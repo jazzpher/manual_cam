@@ -3,13 +3,7 @@ import UIKit
 import Flutter
 import Photos
 
-/// Native AVFoundation-based camera manager na binibigay ng true manual controls:
-/// - Manual ISO
-/// - Manual Shutter Speed (exposureDuration)
-/// - Manual Focus (lensPosition)
-/// - HDR
-/// - Zoom
-/// - Flash
+/// Native AVFoundation-based camera manager na binibigay ng true manual controls.
 class CameraManager: NSObject {
     static let shared = CameraManager()
 
@@ -47,8 +41,11 @@ class CameraManager: NSObject {
                 if self.session.canAddOutput(self.photoOutput) {
                     self.session.addOutput(self.photoOutput)
                     self.photoOutput.isHighResolutionCaptureEnabled = true
+
+                    // === SPEED OPTIMIZATION ===
+                    // Prioritize speed over quality (huge difference sa capture time)
                     if #available(iOS 13.0, *) {
-                        self.photoOutput.maxPhotoQualityPrioritization = .quality
+                        self.photoOutput.maxPhotoQualityPrioritization = .balanced
                     }
                 }
 
@@ -80,15 +77,12 @@ class CameraManager: NSObject {
 
     // MARK: - Manual Controls
 
-    /// Set manual ISO (100 – device max, e.g. 3200 for iPhone 13).
-    /// Also lock exposure to custom mode.
     func setISO(_ iso: Float, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
         sessionQueue.async {
             do {
                 try d.lockForConfiguration()
                 let clamped = max(d.activeFormat.minISO, min(iso, d.activeFormat.maxISO))
-                // Retain current exposure duration
                 let currentDur = d.exposureDuration
                 d.setExposureModeCustom(duration: currentDur, iso: clamped, completionHandler: nil)
                 d.unlockForConfiguration()
@@ -99,7 +93,6 @@ class CameraManager: NSObject {
         }
     }
 
-    /// Set shutter speed in seconds (e.g. 1/60 = 0.0167).
     func setShutterSpeed(_ seconds: Double, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
         sessionQueue.async {
@@ -119,13 +112,11 @@ class CameraManager: NSObject {
         }
     }
 
-    /// Set exposure bias (EV compensation), -8 to +8 typically.
     func setExposureBias(_ bias: Float, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
         sessionQueue.async {
             do {
                 try d.lockForConfiguration()
-                // Switch to auto exposure so bias applies
                 if d.isExposureModeSupported(.continuousAutoExposure) {
                     d.exposureMode = .continuousAutoExposure
                 }
@@ -139,7 +130,6 @@ class CameraManager: NSObject {
         }
     }
 
-    /// Set manual focus lens position (0.0 = far/infinity, 1.0 = closest/macro).
     func setFocus(_ position: Float, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
         sessionQueue.async {
@@ -159,7 +149,6 @@ class CameraManager: NSObject {
         }
     }
 
-    /// Tap-to-focus at normalized point (0.0-1.0).
     func focusAtPoint(x: Float, y: Float, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
         sessionQueue.async {
@@ -182,7 +171,6 @@ class CameraManager: NSObject {
         }
     }
 
-    /// Set zoom (1.0 = wide, up to maxZoom).
     func setZoom(_ factor: CGFloat, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
         sessionQueue.async {
@@ -198,7 +186,6 @@ class CameraManager: NSObject {
         }
     }
 
-    /// Set flash mode: "off" | "on" | "auto"
     func setFlashMode(_ mode: String) {
         switch mode {
         case "on": flashMode = .on
@@ -207,32 +194,37 @@ class CameraManager: NSObject {
         }
     }
 
-    /// Enable/disable HDR (auto-HDR via bracketing).
     func setHDR(_ enabled: Bool) {
         isHDREnabled = enabled
     }
 
-    // MARK: - Capture
+    // MARK: - Capture (OPTIMIZED for speed)
 
     func capturePhoto(completion: @escaping (Result<String, Error>) -> Void) {
         sessionQueue.async {
-            let settings: AVCapturePhotoSettings
+            let settings = AVCapturePhotoSettings()
 
-            if self.isHDREnabled, #available(iOS 13.0, *) {
-                // Use bracketed exposure for HDR-like effect
-                settings = AVCapturePhotoSettings()
-                settings.isHighResolutionPhotoEnabled = true
-                settings.photoQualityPrioritization = .quality
-            } else {
-                settings = AVCapturePhotoSettings()
-                settings.isHighResolutionPhotoEnabled = true
-                if #available(iOS 13.0, *) {
-                    settings.photoQualityPrioritization = .quality
-                }
+            // === SPEED OPTIMIZATIONS ===
+            settings.isHighResolutionPhotoEnabled = true
+
+            if #available(iOS 13.0, *) {
+                // .balanced ay mas mabilis kaysa .quality
+                // .speed ay pinakamabilis pero maliit ang resolution
+                settings.photoQualityPrioritization = .balanced
             }
 
-            if self.device?.hasFlash == true {
+            // Disable auto features na nag-a-add ng delay
+            settings.isAutoStillImageStabilizationEnabled = false
+
+            // Flash setting
+            if let d = self.device, d.hasFlash {
                 settings.flashMode = self.flashMode
+            }
+
+            // HDR — sa iOS built into photo output, medyo dagdag delay
+            // Kung enabled, wag i-disable stabilization
+            if self.isHDREnabled {
+                settings.isAutoStillImageStabilizationEnabled = true
             }
 
             self.lastPhotoCompletion = completion
@@ -247,25 +239,32 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
         if let error = error {
-            lastPhotoCompletion?(.failure(error))
+            DispatchQueue.main.async {
+                self.lastPhotoCompletion?(.failure(error))
+            }
             return
         }
         guard let data = photo.fileDataRepresentation() else {
-            lastPhotoCompletion?(.failure(NSError(domain: "Camera", code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "No photo data"])))
+            DispatchQueue.main.async {
+                self.lastPhotoCompletion?(.failure(NSError(domain: "Camera", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "No photo data"])))
+            }
             return
         }
 
-        // Save to temp file
         let tmpDir = NSTemporaryDirectory()
         let filename = "manualcam_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
         let filePath = (tmpDir as NSString).appendingPathComponent(filename)
 
         do {
             try data.write(to: URL(fileURLWithPath: filePath))
-            lastPhotoCompletion?(.success(filePath))
+            DispatchQueue.main.async {
+                self.lastPhotoCompletion?(.success(filePath))
+            }
         } catch {
-            lastPhotoCompletion?(.failure(error))
+            DispatchQueue.main.async {
+                self.lastPhotoCompletion?(.failure(error))
+            }
         }
     }
 }

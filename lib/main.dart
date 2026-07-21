@@ -39,7 +39,6 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isInitialized = false;
   String _statusMessage = 'Starting native camera...';
 
-  // Manual control state
   double _iso = 100;
   double _minISO = 24;
   double _maxISO = 3200;
@@ -54,14 +53,12 @@ class _CameraScreenState extends State<CameraScreen> {
   String _aspectRatio = '4:3';
   bool _isCapturing = false;
 
-  // UI popups
   bool _showISOSlider = false;
   bool _showEVSlider = false;
   bool _showShutterPicker = false;
   bool _showFocusSlider = false;
   bool _showZoomSlider = false;
 
-  // Tap-to-focus feedback
   Offset? _tapFocusPoint;
 
   final List<double> _shutterSpeedValues = [
@@ -144,7 +141,6 @@ class _CameraScreenState extends State<CameraScreen> {
       _tapFocusPoint = Offset(x, y);
     });
     await _camera.focusAtPoint(x, y);
-    // Clear reticle after animation
     Future.delayed(const Duration(milliseconds: 1200), () {
       if (mounted) setState(() => _tapFocusPoint = null);
     });
@@ -223,7 +219,6 @@ class _CameraScreenState extends State<CameraScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Native camera preview (tap to focus)
           Positioned.fill(
             child: NativeCameraPreview(
               aspectRatio: _aspectRatio,
@@ -231,11 +226,9 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
 
-          // Tap-to-focus reticle
           if (_tapFocusPoint != null)
             _buildFocusReticle(_tapFocusPoint!),
 
-          // Bottom gradient
           Positioned(
             bottom: 0,
             left: 0,
@@ -252,7 +245,6 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
 
-          // Controls
           ControlsOverlay(
             iso: _iso,
             minISO: _minISO,
@@ -277,34 +269,39 @@ class _CameraScreenState extends State<CameraScreen> {
             onFlashModeChanged: _setFlash,
             onCapture: _capturePhoto,
             onToggleHDR: _toggleHDR,
+            onCloseAllPopups: _closeAllPopups,
             showISOSlider: _showISOSlider,
             onToggleISOSlider: () {
+              final wasOpen = _showISOSlider;
               _closeAllPopups();
-              setState(() => _showISOSlider = !_showISOSlider);
+              setState(() => _showISOSlider = !wasOpen);
             },
             showEVSlider: _showEVSlider,
             onToggleEVSlider: () {
+              final wasOpen = _showEVSlider;
               _closeAllPopups();
-              setState(() => _showEVSlider = !_showEVSlider);
+              setState(() => _showEVSlider = !wasOpen);
             },
             showShutterPicker: _showShutterPicker,
             onToggleShutterPicker: () {
+              final wasOpen = _showShutterPicker;
               _closeAllPopups();
-              setState(() => _showShutterPicker = !_showShutterPicker);
+              setState(() => _showShutterPicker = !wasOpen);
             },
             showFocusSlider: _showFocusSlider,
             onToggleFocusSlider: () {
+              final wasOpen = _showFocusSlider;
               _closeAllPopups();
-              setState(() => _showFocusSlider = !_showFocusSlider);
+              setState(() => _showFocusSlider = !wasOpen);
             },
             showZoomSlider: _showZoomSlider,
             onToggleZoomSlider: () {
+              final wasOpen = _showZoomSlider;
               _closeAllPopups();
-              setState(() => _showZoomSlider = !_showZoomSlider);
+              setState(() => _showZoomSlider = !wasOpen);
             },
           ),
 
-          // Top-right label
           Positioned(
             top: 40,
             right: 12,
@@ -332,8 +329,6 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget _buildFocusReticle(Offset point) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // The tap point is relative to the preview widget, not the whole screen.
-        // For simplicity, we approximate center-position on the screen.
         return Center(
           child: TweenAnimationBuilder<double>(
             key: ValueKey(point),

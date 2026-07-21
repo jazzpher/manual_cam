@@ -11,6 +11,7 @@ class ControlsOverlay extends StatelessWidget {
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
   final VoidCallback onCapture, onToggleHDR;
   final VoidCallback onToggleISOSlider, onToggleEVSlider, onToggleShutterPicker, onToggleFocusSlider, onToggleZoomSlider;
+  final VoidCallback onCloseAllPopups;
 
   const ControlsOverlay({
     super.key,
@@ -47,14 +48,29 @@ class ControlsOverlay extends StatelessWidget {
     required this.onToggleFocusSlider,
     required this.showZoomSlider,
     required this.onToggleZoomSlider,
+    required this.onCloseAllPopups,
   });
+
+  bool get _anyPopupOpen =>
+      showISOSlider || showEVSlider || showShutterPicker || showFocusSlider || showZoomSlider;
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Stack(
-        children: [
-          Column(
+    return Stack(
+      children: [
+        // === Tap-outside-to-dismiss backdrop (only when popup is open) ===
+        if (_anyPopupOpen)
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: onCloseAllPopups,
+              child: Container(color: Colors.transparent),
+            ),
+          ),
+
+        // === Main controls (top bar + settings + bottom) ===
+        SafeArea(
+          child: Column(
             children: [
               _buildTopBar(),
               const Spacer(),
@@ -64,13 +80,15 @@ class ControlsOverlay extends StatelessWidget {
               const SizedBox(height: 16),
             ],
           ),
-          if (showISOSlider) _buildISOSliderPopup(context),
-          if (showEVSlider) _buildEVSliderPopup(context),
-          if (showShutterPicker) _buildShutterPickerPopup(context),
-          if (showFocusSlider) _buildFocusSliderPopup(context),
-          if (showZoomSlider) _buildZoomSliderPopup(context),
-        ],
-      ),
+        ),
+
+        // === Popups (rendered ON TOP ng backdrop, so tap sa loob nila hindi mag-a-dismiss) ===
+        if (showISOSlider) _buildISOSliderPopup(context),
+        if (showEVSlider) _buildEVSliderPopup(context),
+        if (showShutterPicker) _buildShutterPickerPopup(context),
+        if (showFocusSlider) _buildFocusSliderPopup(context),
+        if (showZoomSlider) _buildZoomSliderPopup(context),
+      ],
     );
   }
 
@@ -79,7 +97,6 @@ class ControlsOverlay extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
-          // Flash
           GestureDetector(
             onTap: () {
               final next = flashMode == 'off' ? 'on' : flashMode == 'on' ? 'auto' : 'off';
@@ -96,7 +113,6 @@ class ControlsOverlay extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // HDR
           GestureDetector(
             onTap: onToggleHDR,
             child: _pill(
@@ -186,19 +202,23 @@ class ControlsOverlay extends StatelessWidget {
   Widget _buildSettingButton({required String label, required String value, required VoidCallback onTap}) {
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'monospace',
-              )),
-          const SizedBox(height: 2),
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.w500)),
-        ],
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'monospace',
+                )),
+            const SizedBox(height: 2),
+            Text(label, style: const TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.w500)),
+          ],
+        ),
       ),
     );
   }
@@ -245,179 +265,205 @@ class ControlsOverlay extends StatelessWidget {
     );
   }
 
-  Widget _sliderPopup({
-    required BuildContext context,
+  // === Reusable popup ===
+  Widget _popupCard({
     required String title,
-    required double value,
-    required double min,
-    required double max,
-    required String display,
     required VoidCallback onClose,
-    required Function(double) onChanged,
-    int? divisions,
+    required Widget child,
   }) {
     return Positioned(
-      bottom: 200,
-      left: 16,
-      right: 16,
+      bottom: 220,
+      left: 12,
+      right: 12,
       child: Material(
         color: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.black87,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  GestureDetector(onTap: onClose, child: const Icon(Icons.close, color: Colors.white54, size: 20)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  activeTrackColor: Colors.amber,
-                  inactiveTrackColor: Colors.white24,
-                  thumbColor: Colors.amber,
-                  overlayColor: Colors.amber.withOpacity(0.2),
+        child: GestureDetector(
+          // I-block yung tap-outside-to-dismiss kapag tinap sa loob ng popup
+          onTap: () {},
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 16),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.92),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    ),
+                    // Malaking tap area para sa X (44x44 = Apple HIG min tap size)
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: onClose,
+                        borderRadius: BorderRadius.circular(22),
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          alignment: Alignment.center,
+                          child: Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white12,
+                            ),
+                            child: const Icon(Icons.close, color: Colors.white, size: 18),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                child: Slider(
-                  value: value.clamp(min, max),
-                  min: min,
-                  max: max,
-                  divisions: divisions,
-                  onChanged: onChanged,
-                ),
-              ),
-              Text(display,
-                  style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 16)),
-            ],
+                const SizedBox(height: 8),
+                child,
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
+  Widget _slider({
+    required BuildContext context,
+    required double value,
+    required double min,
+    required double max,
+    required String display,
+    required Function(double) onChanged,
+    int? divisions,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            activeTrackColor: Colors.amber,
+            inactiveTrackColor: Colors.white24,
+            thumbColor: Colors.amber,
+            overlayColor: Colors.amber.withOpacity(0.2),
+            trackHeight: 4,
+          ),
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
+          ),
+        ),
+        Text(display,
+            style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 16)),
+      ],
+    );
+  }
+
   Widget _buildISOSliderPopup(BuildContext context) {
-    return _sliderPopup(
-      context: context,
+    return _popupCard(
       title: 'ISO',
-      value: iso,
-      min: minISO,
-      max: maxISO,
-      display: 'ISO ${iso.toInt()}',
-      divisions: 50,
       onClose: onToggleISOSlider,
-      onChanged: onISOChanged,
+      child: _slider(
+        context: context,
+        value: iso,
+        min: minISO,
+        max: maxISO,
+        display: 'ISO ${iso.toInt()}',
+        divisions: 50,
+        onChanged: onISOChanged,
+      ),
     );
   }
 
   Widget _buildEVSliderPopup(BuildContext context) {
-    return _sliderPopup(
-      context: context,
+    return _popupCard(
       title: 'Exposure Bias (EV)',
-      value: exposureBias,
-      min: -4.0,
-      max: 4.0,
-      display: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV',
-      divisions: 32,
       onClose: onToggleEVSlider,
-      onChanged: onExposureBiasChanged,
+      child: _slider(
+        context: context,
+        value: exposureBias,
+        min: -4.0,
+        max: 4.0,
+        display: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV',
+        divisions: 32,
+        onChanged: onExposureBiasChanged,
+      ),
     );
   }
 
   Widget _buildFocusSliderPopup(BuildContext context) {
-    return _sliderPopup(
-      context: context,
-      title: 'Manual Focus (0=∞, 1=macro)',
-      value: focus,
-      min: 0.0,
-      max: 1.0,
-      display: focus.toStringAsFixed(2),
-      divisions: 100,
+    return _popupCard(
+      title: 'Manual Focus  (0 = ∞    1 = macro)',
       onClose: onToggleFocusSlider,
-      onChanged: onFocusChanged,
+      child: _slider(
+        context: context,
+        value: focus,
+        min: 0.0,
+        max: 1.0,
+        display: focus.toStringAsFixed(2),
+        divisions: 100,
+        onChanged: onFocusChanged,
+      ),
     );
   }
 
   Widget _buildZoomSliderPopup(BuildContext context) {
-    return _sliderPopup(
-      context: context,
+    return _popupCard(
       title: 'Zoom',
-      value: zoom,
-      min: 1.0,
-      max: maxZoom,
-      display: '${zoom.toStringAsFixed(1)}x',
-      divisions: ((maxZoom - 1.0) * 10).round(),
       onClose: onToggleZoomSlider,
-      onChanged: onZoomChanged,
+      child: _slider(
+        context: context,
+        value: zoom,
+        min: 1.0,
+        max: maxZoom,
+        display: '${zoom.toStringAsFixed(1)}x',
+        divisions: ((maxZoom - 1.0) * 10).round().clamp(1, 100),
+        onChanged: onZoomChanged,
+      ),
     );
   }
 
   Widget _buildShutterPickerPopup(BuildContext context) {
-    return Positioned(
-      bottom: 200,
-      left: 16,
-      right: 16,
-      child: Material(
-        color: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.black87,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Shutter Speed', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  GestureDetector(onTap: onToggleShutterPicker, child: const Icon(Icons.close, color: Colors.white54, size: 20)),
-                ],
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 60,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: shutterSpeedValues.length,
-                  itemBuilder: (context, i) {
-                    final val = shutterSpeedValues[i];
-                    final label = val >= 1 ? '${val.toInt()}"' : '1/${(1 / val).round()}';
-                    final selected = label == shutterSpeed;
-                    return GestureDetector(
-                      onTap: () => onShutterSpeedChanged(val),
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: selected ? Colors.amber.withOpacity(0.3) : Colors.white10,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: selected ? Colors.amber : Colors.white24),
-                        ),
-                        child: Center(
-                          child: Text(label,
-                              style: TextStyle(
-                                color: selected ? Colors.amber : Colors.white70,
-                                fontWeight: FontWeight.bold,
-                              )),
-                        ),
-                      ),
-                    );
-                  },
+    return _popupCard(
+      title: 'Shutter Speed',
+      onClose: onToggleShutterPicker,
+      child: SizedBox(
+        height: 60,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          itemCount: shutterSpeedValues.length,
+          itemBuilder: (context, i) {
+            final val = shutterSpeedValues[i];
+            final label = val >= 1 ? '${val.toInt()}"' : '1/${(1 / val).round()}';
+            final selected = label == shutterSpeed;
+            return GestureDetector(
+              onTap: () => onShutterSpeedChanged(val),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: selected ? Colors.amber.withOpacity(0.3) : Colors.white10,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: selected ? Colors.amber : Colors.white24),
+                ),
+                child: Center(
+                  child: Text(label,
+                      style: TextStyle(
+                        color: selected ? Colors.amber : Colors.white70,
+                        fontWeight: FontWeight.bold,
+                      )),
                 ),
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
