@@ -1,0 +1,31 @@
+workflows:
+  manualcam-ios:
+    name: ManualCam iOS
+    instance_type: mac_mini_m2
+    environment:
+      flutter: stable
+    scripts:
+      - name: Flutter clean & pub get
+        script: |
+          flutter clean
+          flutter pub get
+          # Ensure iOS config files are generated
+          flutter build ios --release --no-codesign --config-only || true
+      - name: Install iOS pods (if Podfile present)
+        script: |
+          cd ios
+          pod install --repo-update || echo "pod install skipped or not needed"
+          cd ..
+      - name: Build Unsigned iOS IPA
+        script: |
+          flutter build ipa --release --no-codesign --verbose
+          echo "✅ Unsigned IPA created successfully!"
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      email:
+        recipients:
+          - $CM_BUILD_USER_EMAIL
+        notify:
+          success: true
+          failure: true
