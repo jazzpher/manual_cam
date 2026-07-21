@@ -5,6 +5,8 @@ import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
+import 'package:gal/gal.dart';
+import 'package:image/image.dart' as img;
 
 class ManualCamera {
   CameraController? _controller;
@@ -22,6 +24,13 @@ class ManualCamera {
 
   CameraController? get controller => _controller;
   bool get isInitialized => _initialized && _controller != null;
+
+  /// Native aspect ratio ng preview sa PORTRAIT (width/height).
+  /// iPhone camera usually 3:4 in portrait (0.75).
+  double? get nativePortraitAspectRatio {
+    if (_controller == null || !_controller!.value.isInitialized) return null;
+    return 1 / _controller!.value.aspectRatio;
+  }
 
   Future<void> initialize() async {
     if (_initialized && _controller != null) return;
@@ -43,7 +52,7 @@ class ManualCamera {
 
     _controller = CameraController(
       backCamera,
-      ResolutionPreset.high,
+      ResolutionPreset.max,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -51,8 +60,8 @@ class ManualCamera {
     await _controller!.initialize();
 
     try {
-      final minExposure = await _controller!.getMinExposureOffset();
-      final maxExposure = await _controller!.getMaxExposureOffset();
+      await _controller!.getMinExposureOffset();
+      await _controller!.getMaxExposureOffset();
       _minISO = 24;
       _maxISO = 1600;
     } catch (e) {
@@ -66,6 +75,7 @@ class ManualCamera {
 
     _initialized = true;
     print('✅ Real camera initialized: ${backCamera.name}');
+    print('   Native preview size: ${_controller!.value.previewSize}');
   }
 
   Future<Map<String, dynamic>> getCapabilities() async {
@@ -115,7 +125,11 @@ class ManualCamera {
     }
   }
 
-  Future<String> capturePhoto({bool raw = true}) async {
+  /// Capture, crop to aspect ratio (kung binigay), tapos save sa Photos app.
+  Future<String> capturePhoto({
+    bool raw = true,
+    double? portraitAspectRatio,
+  }) async {
     if (!isInitialized || _controller == null) {
       throw Exception('Camera not initialized');
     }
@@ -125,20 +139,79 @@ class ManualCamera {
 
       final Directory appDir = await getApplicationDocumentsDirectory();
       final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      final String rawPath = path.join(appDir.path, 'manualcam_$timestamp.jpg');
+      await file.saveTo(rawPath);
 
-      final String extension = raw ? 'jpg' : 'jpg';
-      final String fileName = 'manualcam_$timestamp.$extension';
-      final String savedPath = path.join(appDir.path, fileName);
+      String finalPath = rawPath;
+      if (portraitAspectRatio != null) {
+        try {
+          finalPath = await _cropToAspectRatio(rawPath, portraitAspectRatio);
+        } catch (e) {
+          print('⚠️ Crop failed, using original: $e');
+          finalPath = rawPath;
+        }
+      }
 
-      await file.saveTo(savedPath);
+      try {
+        final hasAccess = await Gal.hasAccess(toAlbum: true);
+        if (!hasAccess) {
+          await Gal.requestAccess(toAlbum: true);
+        }
+        await Gal.putImage(finalPath, album: 'ManualCam');
+        print('✅ Saved to Photos app (album: ManualCam)');
+      } catch (e) {
+        print('❌ Photos save error: $e');
+      }
 
-      print('📸 REAL photo saved: $savedPath (RAW mode: $raw - using JPEG)');
-
-      return savedPath;
+      return finalPath;
     } catch (e) {
       print('Capture error: $e');
       throw Exception('Failed to capture photo: $e');
     }
+  }
+
+  Future<String> _cropToAspectRatio(String imagePath, double portraitAspectRatio) async {
+    final File srcFile = File(imagePath);
+    final bytes = await srcFile.readAsBytes();
+
+    img.Image? decoded = img.decodeJpg(bytes);
+    if (decoded == null) throw Exception('Failed to decode JPEG');
+
+    decoded = img.bakeOrientation(decoded);
+
+    final int w = decoded.width;
+    final int h = decoded.height;
+
+    final bool imageIsPortrait = h >= w;
+
+    double targetAspect;
+    if (imageIsPortrait) {
+      targetAspect = portraitAspectRatio;
+    } else {
+      targetAspect = 1 / portraitAspectRatio;
+    }
+
+    final double currentAspect = w / h;
+
+    int cropW, cropH;
+    if (currentAspect > targetAspect) {
+      cropH = h;
+      cropW = (h * targetAspect).round();
+    } else {
+      cropW = w;
+      cropH = (w / targetAspect).round();
+    }
+
+    final int cropX = ((w - cropW) / 2).round();
+    final int cropY = ((h - cropH) / 2).round();
+
+    final cropped = img.copyCrop(decoded, x: cropX, y: cropY, width: cropW, height: cropH);
+    final jpg = img.encodeJpg(cropped, quality: 95);
+
+    final String croppedPath = imagePath.replaceFirst('.jpg', '_cropped.jpg');
+    await File(croppedPath).writeAsBytes(jpg);
+
+    return croppedPath;
   }
 
   Future<void> setFocusPoint(double x, double y) async {
