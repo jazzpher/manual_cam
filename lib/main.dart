@@ -36,7 +36,7 @@ class CameraScreen extends StatefulWidget {
 class _CameraScreenState extends State<CameraScreen> {
   final ManualCamera _camera = ManualCamera();
   bool _isInitialized = false;
-  bool _isRawEnabled = false; // Real RAW not supported with camera plugin
+  bool _isRawEnabled = false;
   double _iso = 100;
   double _minISO = 24;
   double _maxISO = 1600;
@@ -88,6 +88,20 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
+  double _aspectRatioToValue(String label) {
+    switch (label) {
+      case '16:9':
+        return 9 / 16;
+      case '1:1':
+        return 1.0;
+      case '3:2':
+        return 2 / 3;
+      case '4:3':
+      default:
+        return 3 / 4;
+    }
+  }
+
   Future<void> _setISO(double value) async {
     await _camera.setISO(value);
     setState(() => _iso = value);
@@ -117,9 +131,12 @@ class _CameraScreenState extends State<CameraScreen> {
     });
 
     try {
-      final path = await _camera.capturePhoto(raw: _isRawEnabled);
+      final path = await _camera.capturePhoto(
+        raw: _isRawEnabled,
+        portraitAspectRatio: _aspectRatioToValue(_aspectRatio),
+      );
 
-      if (path != null && mounted) {
+      if (mounted) {
         setState(() {
           _lastPhotoPath = path;
           _statusMessage = '';
@@ -127,17 +144,9 @@ class _CameraScreenState extends State<CameraScreen> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              _isRawEnabled
-                  ? '📸 Photo saved! (Note: RAW not fully supported yet)'
-                  : '📸 Real photo captured & saved!',
-            ),
+            content: const Text('📸 Saved to Photos app (album: ManualCam)'),
             backgroundColor: Colors.green.shade700,
-            duration: const Duration(seconds: 3),
-            action: SnackBarAction(
-              label: 'OK',
-              onPressed: () {},
-            ),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -154,7 +163,7 @@ class _CameraScreenState extends State<CameraScreen> {
       }
     }
 
-    setState(() => _isCapturing = false);
+    if (mounted) setState(() => _isCapturing = false);
   }
 
   String _formatShutterSpeed(double seconds) {
@@ -202,8 +211,13 @@ class _CameraScreenState extends State<CameraScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Real camera preview (or simulated fallback)
-          CameraPreview(camera: _camera),
+          // Real camera preview na may correct aspect ratio (no distortion)
+          Positioned.fill(
+            child: CameraPreview(
+              camera: _camera,
+              aspectRatio: _aspectRatio,
+            ),
+          ),
 
           // Bottom gradient for controls
           Positioned(
@@ -248,7 +262,7 @@ class _CameraScreenState extends State<CameraScreen> {
             onToggleEVSlider: () => setState(() => _showEVSlider = !_showEVSlider),
           ),
 
-          // Status / note banner (top)
+          // Status banner
           if (_statusMessage.isNotEmpty)
             Positioned(
               top: 60,
@@ -269,7 +283,7 @@ class _CameraScreenState extends State<CameraScreen> {
               ),
             ),
 
-          // Info banner about limitations
+          // Info badge
           Positioned(
             top: 40,
             right: 12,
@@ -279,9 +293,9 @@ class _CameraScreenState extends State<CameraScreen> {
                 color: Colors.black54,
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: const Text(
-                'REAL iPhone Camera',
-                style: TextStyle(
+              child: Text(
+                '$_aspectRatio · REAL',
+                style: const TextStyle(
                   color: Colors.amber,
                   fontSize: 10,
                   fontWeight: FontWeight.bold,

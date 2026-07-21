@@ -3,147 +3,94 @@ import '../services/manual_camera.dart';
 
 class CameraPreview extends StatelessWidget {
   final ManualCamera camera;
-  const CameraPreview({super.key, required this.camera});
+  final String aspectRatio; // "4:3" | "16:9" | "1:1" | "3:2"
+
+  const CameraPreview({
+    super.key,
+    required this.camera,
+    this.aspectRatio = '4:3',
+  });
+
+  /// Convert aspect ratio label to width/height (portrait).
+  double _aspectToRatio(String label) {
+    switch (label) {
+      case '16:9':
+        return 9 / 16; // portrait: mas tall (0.5625)
+      case '1:1':
+        return 1.0;
+      case '3:2':
+        return 2 / 3; // portrait (0.667)
+      case '4:3':
+      default:
+        return 3 / 4; // portrait (0.75) — native ng iPhone camera
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final double targetAspect = _aspectToRatio(aspectRatio);
+
+    if (camera.controller == null || !camera.controller!.value.isInitialized) {
+      return Container(
+        color: Colors.black,
+        child: const Center(
+          child: CircularProgressIndicator(color: Colors.amber),
+        ),
+      );
+    }
+
+    // Native aspect ratio ng camera sa portrait (~ 0.75 for 4:3)
+    final double nativeAspect = camera.nativePortraitAspectRatio ?? 0.75;
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        // If we have a real camera controller, use it
-        if (camera.controller != null && camera.controller!.value.isInitialized) {
-          return Stack(
-            children: [
-              // REAL CAMERA PREVIEW
-              SizedBox.expand(
+        // Compute preview box size na fit sa screen with target aspect ratio.
+        double previewW = constraints.maxWidth;
+        double previewH = previewW / targetAspect;
+
+        if (previewH > constraints.maxHeight) {
+          previewH = constraints.maxHeight;
+          previewW = previewH * targetAspect;
+        }
+
+        return Container(
+          color: Colors.black,
+          alignment: Alignment.center,
+          child: SizedBox(
+            width: previewW,
+            height: previewH,
+            child: ClipRect(
+              child: OverflowBox(
+                // Native camera aspect ratio (usually 4:3 = 0.75 portrait)
+                // Ilalagay natin yung camera preview sa native aspect nito,
+                // tapos ang ClipRect na wrapper ang mag-cro-crop sa target aspect.
+                alignment: Alignment.center,
+                maxWidth: double.infinity,
+                maxHeight: double.infinity,
                 child: FittedBox(
-                  fit: BoxFit.cover,
+                  fit: targetAspect > nativeAspect
+                      ? BoxFit.fitWidth // target is wider than native — fill width, crop top/bottom
+                      : BoxFit.fitHeight, // target is taller than native — fill height, crop sides
                   child: SizedBox(
-                    width: camera.controller!.value.previewSize?.width ?? constraints.maxWidth,
-                    height: camera.controller!.value.previewSize?.height ?? constraints.maxHeight,
+                    width: 1000, // arbitrary base, actual sized by FittedBox
+                    height: 1000 / nativeAspect,
                     child: camera.getPreviewWidget(),
                   ),
                 ),
               ),
-
-              // Overlay elements (grid, crosshair, watermark)
-              _buildOverlay(constraints),
-            ],
-          );
-        }
-
-        // Fallback to simulated viewfinder (while initializing or on error)
-        return Container(
-          color: Colors.black,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              _buildSimulatedViewfinder(constraints),
-              _buildOverlay(constraints),
-            ],
+            ),
           ),
         );
       },
     );
   }
-
-  Widget _buildOverlay(BoxConstraints constraints) {
-    return Stack(
-      children: [
-        // Grid lines
-        Positioned.fill(
-          child: IgnorePointer(
-            child: CustomPaint(
-              painter: GridPainter(),
-            ),
-          ),
-        ),
-
-        // Center crosshair
-        Center(
-          child: Icon(
-            Icons.center_focus_strong,
-            size: 60,
-            color: Colors.white.withOpacity(0.3),
-          ),
-        ),
-
-        // "MANUAL CAM" watermark
-        Positioned(
-          bottom: 20,
-          child: Text(
-            'MANUAL CAM',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.15),
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 6,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSimulatedViewfinder(BoxConstraints constraints) {
-    return CustomPaint(
-      size: Size(constraints.maxWidth, constraints.maxHeight),
-      painter: ViewfinderPainter(),
-    );
-  }
-}
-
-class ViewfinderPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final gradient = LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [
-        const Color(0xFF1a1a2e),
-        const Color(0xFF16213e),
-        const Color(0xFF0f3460),
-      ],
-    );
-    canvas.drawRect(rect, Paint()..shader = gradient.createShader(rect));
-
-    final viewfinderRect = Rect.fromCenter(
-      center: Offset(size.width / 2, size.height / 2),
-      width: size.width * 0.85,
-      height: size.height * 0.75,
-    );
-
-    final borderPaint = Paint()
-      ..color = Colors.white.withOpacity(0.2)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    canvas.drawRect(viewfinderRect, borderPaint);
-
-    final cornerPaint = Paint()
-      ..color = Colors.white.withOpacity(0.4)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-
-    final c = viewfinderRect;
-    canvas.drawLine(c.topLeft, Offset(c.left + 30, c.top), cornerPaint);
-    canvas.drawLine(c.topLeft, Offset(c.left, c.top + 30), cornerPaint);
-    canvas.drawLine(c.topRight, Offset(c.right - 30, c.top), cornerPaint);
-    canvas.drawLine(c.topRight, Offset(c.right, c.top + 30), cornerPaint);
-    canvas.drawLine(c.bottomLeft, Offset(c.left + 30, c.bottom), cornerPaint);
-    canvas.drawLine(c.bottomLeft, Offset(c.left, c.bottom - 30), cornerPaint);
-    canvas.drawLine(c.bottomRight, Offset(c.right - 30, c.bottom), cornerPaint);
-    canvas.drawLine(c.bottomRight, Offset(c.right, c.bottom - 30), cornerPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.07)
+      ..color = Colors.white.withOpacity(0.15)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.5;
 
