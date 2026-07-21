@@ -2,7 +2,7 @@ name: manual_cam
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ^3.12.2
@@ -13,16 +13,11 @@ dependencies:
 
   cupertino_icons: ^1.0.8
 
-  # Real camera support
-  camera: ^0.11.0+2
+  # Native permissions
   permission_handler: ^11.3.1
-  path_provider: ^2.1.4
 
-  # Save photos to iOS Photos app / Android Gallery
+  # Save photos to iOS Photos app
   gal: ^2.3.0
-
-  # Image cropping (for aspect ratio switching)
-  image: ^4.3.0
 
 dev_dependencies:
   flutter_test:

@@ -1,6 +1,6 @@
 workflows:
   manualcam-ios:
-    name: ManualCam iOS (Unsigned IPA for Sideloadly)
+    name: ManualCam iOS (Native AVFoundation)
     instance_type: mac_mini_m2
     max_build_duration: 60
     environment:
@@ -21,13 +21,66 @@ workflows:
           set -e
           flutter pub get
 
-      # === 3. Generate iOS build settings ===
+      # === 3. Add Swift files to Xcode project (kailangan ito kung wala kang Xcode local) ===
+      - name: Add Swift Files to Xcode Project
+        script: |
+          set -e
+          cd ios
+
+          # Install xcodeproj gem (kung wala pa)
+          if ! gem list -i xcodeproj > /dev/null 2>&1; then
+            sudo gem install xcodeproj --no-document
+          fi
+
+          # Ruby script para mag-add ng CameraManager.swift at CameraPreviewView.swift sa Runner target
+          ruby <<'EOF'
+          require 'xcodeproj'
+
+          project_path = 'Runner.xcodeproj'
+          project = Xcodeproj::Project.open(project_path)
+          target = project.targets.find { |t| t.name == 'Runner' }
+          runner_group = project.main_group['Runner']
+
+          files_to_add = ['CameraManager.swift', 'CameraPreviewView.swift']
+
+          files_to_add.each do |filename|
+            file_path = "Runner/#{filename}"
+
+            # Skip if already in project
+            existing = runner_group.files.find { |f| f.path == filename }
+            if existing
+              puts "✓ #{filename} already in project"
+              next
+            end
+
+            # Verify file exists on disk
+            unless File.exist?(file_path)
+              puts "✗ #{file_path} does not exist on disk!"
+              exit 1
+            end
+
+            # Add file reference to Runner group
+            file_ref = runner_group.new_reference(filename)
+
+            # Add to Runner target's source build phase
+            target.source_build_phase.add_file_reference(file_ref)
+
+            puts "✓ Added #{filename} to Runner target"
+          end
+
+          project.save
+          puts "✅ Xcode project updated"
+          EOF
+
+          cd ..
+
+      # === 4. Generate iOS build settings ===
       - name: Generate iOS Build Config
         script: |
           set -e
           flutter build ios --release --no-codesign --config-only
 
-      # === 4. Install CocoaPods ===
+      # === 5. Install CocoaPods ===
       - name: Pod Install
         script: |
           set -e
@@ -35,18 +88,17 @@ workflows:
           pod install --repo-update
           cd ..
 
-      # === 5. Build unsigned .app ===
+      # === 6. Build unsigned .app ===
       - name: Build Unsigned iOS App
         script: |
           set -e
           flutter build ios --release --no-codesign --verbose
 
-      # === 6. Manually package .app into .ipa ===
+      # === 7. Manually package .app into .ipa ===
       - name: Package into IPA
         script: |
           set -e
 
-          # Hanapin yung .app — puwedeng nasa dalawang lugar
           APP_PATH=""
           if [ -d "build/ios/iphoneos/Runner.app" ]; then
             APP_PATH="build/ios/iphoneos/Runner.app"
@@ -57,32 +109,23 @@ workflows:
           fi
 
           if [ -z "$APP_PATH" ]; then
-            echo "❌ Runner.app not found in any expected location!"
-            echo "Contents of build/ios/:"
+            echo "❌ Runner.app not found!"
             find build/ios -name "Runner.app" -type d 2>/dev/null || true
-            ls -la build/ios/ 2>/dev/null || true
             exit 1
           fi
 
           echo "✅ Found Runner.app at: $APP_PATH"
           du -sh "$APP_PATH"
 
-          # Create IPA
           mkdir -p build/ios/ipa
           rm -rf Payload
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-
           zip -qr build/ios/ipa/manual_cam.ipa Payload
           rm -rf Payload
 
-          if [ ! -f "build/ios/ipa/manual_cam.ipa" ]; then
-            echo "❌ IPA creation failed"
-            exit 1
-          fi
-
           SIZE=$(ls -lh build/ios/ipa/manual_cam.ipa | awk '{print $5}')
-          echo "✅ IPA created successfully: manual_cam.ipa ($SIZE)"
+          echo "✅ IPA created: manual_cam.ipa ($SIZE)"
           ls -lh build/ios/ipa/
 
     artifacts:

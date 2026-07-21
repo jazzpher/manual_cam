@@ -48,11 +48,11 @@
 		</dict>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>This app requires camera access to capture manual photos with custom ISO, shutter speed, and exposure controls.</string>
+	<string>Manual Cam needs camera access to capture photos with manual ISO, shutter speed, focus, and HDR controls.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>This app needs permission to save captured photos to your Photos library.</string>
+	<string>Manual Cam saves your captured photos to the Photos library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>This app saves captured photos to your Photos library.</string>
+	<string>Manual Cam saves your captured photos to the Photos library.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
@@ -62,15 +62,12 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>io.flutter.embedded_views_preview</key>
+	<true/>
 </dict>
 </plist>

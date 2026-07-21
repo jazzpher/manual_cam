@@ -1,44 +1,74 @@
 import 'package:flutter/material.dart';
 
 class ControlsOverlay extends StatelessWidget {
-  final double iso, minISO, maxISO, exposureBias, zoom;
-  final String shutterSpeed, aspectRatio;
+  final double iso, minISO, maxISO, exposureBias, zoom, maxZoom, focus;
+  final String shutterSpeed, aspectRatio, flashMode;
   final List<double> shutterSpeedValues;
   final List<String> aspectRatios;
-  final bool isRawEnabled, isCapturing, showISOSlider, showEVSlider;
-  final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged;
-  final Function(String) onAspectRatioChanged;
-  final VoidCallback onCapture;
-  final Function(bool) onToggleRaw;
-  final VoidCallback onToggleISOSlider, onToggleEVSlider;
+  final bool isHDREnabled, isCapturing;
+  final bool showISOSlider, showEVSlider, showShutterPicker, showFocusSlider, showZoomSlider;
+  final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
+  final Function(String) onAspectRatioChanged, onFlashModeChanged;
+  final VoidCallback onCapture, onToggleHDR;
+  final VoidCallback onToggleISOSlider, onToggleEVSlider, onToggleShutterPicker, onToggleFocusSlider, onToggleZoomSlider;
 
   const ControlsOverlay({
     super.key,
-    required this.iso, required this.minISO, required this.maxISO,
-    required this.shutterSpeed, required this.shutterSpeedValues,
-    required this.exposureBias, required this.zoom,
-    required this.aspectRatio, required this.aspectRatios,
-    required this.isRawEnabled, required this.isCapturing,
-    required this.onISOChanged, required this.onShutterSpeedChanged,
-    required this.onExposureBiasChanged, required this.onZoomChanged,
-    required this.onAspectRatioChanged, required this.onCapture,
-    required this.onToggleRaw, required this.showISOSlider, required this.onToggleISOSlider,
-    required this.showEVSlider, required this.onToggleEVSlider,
+    required this.iso,
+    required this.minISO,
+    required this.maxISO,
+    required this.shutterSpeed,
+    required this.shutterSpeedValues,
+    required this.exposureBias,
+    required this.zoom,
+    required this.maxZoom,
+    required this.focus,
+    required this.aspectRatio,
+    required this.aspectRatios,
+    required this.flashMode,
+    required this.isHDREnabled,
+    required this.isCapturing,
+    required this.onISOChanged,
+    required this.onShutterSpeedChanged,
+    required this.onExposureBiasChanged,
+    required this.onZoomChanged,
+    required this.onFocusChanged,
+    required this.onAspectRatioChanged,
+    required this.onFlashModeChanged,
+    required this.onCapture,
+    required this.onToggleHDR,
+    required this.showISOSlider,
+    required this.onToggleISOSlider,
+    required this.showEVSlider,
+    required this.onToggleEVSlider,
+    required this.showShutterPicker,
+    required this.onToggleShutterPicker,
+    required this.showFocusSlider,
+    required this.onToggleFocusSlider,
+    required this.showZoomSlider,
+    required this.onToggleZoomSlider,
   });
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Column(
+      child: Stack(
         children: [
-          _buildTopBar(),
-          const Spacer(),
-          _buildSettingsDisplay(),
-          const SizedBox(height: 8),
-          _buildBottomControls(),
-          const SizedBox(height: 16),
+          Column(
+            children: [
+              _buildTopBar(),
+              const Spacer(),
+              _buildSettingsDisplay(),
+              const SizedBox(height: 8),
+              _buildBottomControls(),
+              const SizedBox(height: 16),
+            ],
+          ),
           if (showISOSlider) _buildISOSliderPopup(context),
           if (showEVSlider) _buildEVSliderPopup(context),
+          if (showShutterPicker) _buildShutterPickerPopup(context),
+          if (showFocusSlider) _buildFocusSliderPopup(context),
+          if (showZoomSlider) _buildZoomSliderPopup(context),
         ],
       ),
     );
@@ -49,48 +79,54 @@ class ControlsOverlay extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.black54,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: isRawEnabled ? Colors.amber : Colors.grey, width: 1),
+          // Flash
+          GestureDetector(
+            onTap: () {
+              final next = flashMode == 'off' ? 'on' : flashMode == 'on' ? 'auto' : 'off';
+              onFlashModeChanged(next);
+            },
+            child: _pill(
+              icon: flashMode == 'off'
+                  ? Icons.flash_off
+                  : flashMode == 'on'
+                      ? Icons.flash_on
+                      : Icons.flash_auto,
+              label: flashMode.toUpperCase(),
+              color: flashMode == 'off' ? Colors.grey : Colors.amber,
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(width: 8, height: 8,
-                  decoration: BoxDecoration(shape: BoxShape.circle, color: isRawEnabled ? Colors.amber : Colors.grey)),
-                const SizedBox(width: 4),
-                Text('RAW', style: TextStyle(color: isRawEnabled ? Colors.amber : Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
-              ],
+          ),
+          const SizedBox(width: 8),
+          // HDR
+          GestureDetector(
+            onTap: onToggleHDR,
+            child: _pill(
+              label: 'HDR',
+              color: isHDREnabled ? Colors.amber : Colors.grey,
             ),
           ),
           const Spacer(),
-          GestureDetector(
-            onTap: () => onToggleRaw(!isRawEnabled),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: isRawEnabled ? Colors.orange : Colors.grey, width: 1),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    isRawEnabled ? 'RAW (sim)' : 'JPEG',
-                    style: TextStyle(
-                      color: isRawEnabled ? Colors.orange : Colors.amber,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _pill(label: 'MANUAL', color: Colors.amber),
+        ],
+      ),
+    );
+  }
+
+  Widget _pill({IconData? icon, required String label, required Color color}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color, width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, color: color, size: 14),
+            const SizedBox(width: 4),
+          ],
+          Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -104,17 +140,15 @@ class ControlsOverlay extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildSettingButton(label: 'SHUTTER', value: shutterSpeed, onTap: () {}),
-              const SizedBox(width: 20),
+              _buildSettingButton(label: 'SHUTTER', value: shutterSpeed, onTap: onToggleShutterPicker),
+              const SizedBox(width: 16),
               _buildSettingButton(label: 'ISO', value: '${iso.toInt()}', onTap: onToggleISOSlider),
-              const SizedBox(width: 20),
+              const SizedBox(width: 16),
               _buildSettingButton(label: 'EV', value: exposureBias.toStringAsFixed(1), onTap: onToggleEVSlider),
-              const SizedBox(width: 20),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
-                child: Text('${zoom.toStringAsFixed(1)}x', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
-              ),
+              const SizedBox(width: 16),
+              _buildSettingButton(label: 'FOCUS', value: focus.toStringAsFixed(2), onTap: onToggleFocusSlider),
+              const SizedBox(width: 16),
+              _buildSettingButton(label: 'ZOOM', value: '${zoom.toStringAsFixed(1)}x', onTap: onToggleZoomSlider),
             ],
           ),
           const SizedBox(height: 8),
@@ -133,7 +167,12 @@ class ControlsOverlay extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                       border: Border.all(color: isSelected ? Colors.amber : Colors.white24, width: 1),
                     ),
-                    child: Text(ratio, style: TextStyle(color: isSelected ? Colors.amber : Colors.white70, fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                    child: Text(ratio,
+                        style: TextStyle(
+                          color: isSelected ? Colors.amber : Colors.white70,
+                          fontSize: 11,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        )),
                   ),
                 ),
               );
@@ -150,7 +189,13 @@ class ControlsOverlay extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+          Text(value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+              )),
           const SizedBox(height: 2),
           Text(label, style: const TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.w500)),
         ],
@@ -163,58 +208,95 @@ class ControlsOverlay extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 30),
       child: Row(
         children: [
-          Container(width: 50, height: 50,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.white24), color: Colors.black26)),
+          Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white24),
+              color: Colors.black26,
+            ),
+          ),
           const Spacer(),
           GestureDetector(
             onTap: isCapturing ? null : onCapture,
             child: Container(
-              width: 75, height: 75,
+              width: 75,
+              height: 75,
               decoration: BoxDecoration(
-                shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 4),
                 color: isCapturing ? Colors.white38 : Colors.white,
               ),
               child: Center(
                 child: isCapturing
-                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : Container(width: 63, height: 63, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white)),
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : Container(width: 63, height: 63, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white)),
               ),
             ),
           ),
           const Spacer(),
-          const Opacity(opacity: 0, child: Icon(Icons.flip_camera_ios, color: Colors.white, size: 28)),
+          const SizedBox(width: 50, height: 50),
         ],
       ),
     );
   }
 
-  Widget _buildISOSliderPopup(BuildContext context) {
+  Widget _sliderPopup({
+    required BuildContext context,
+    required String title,
+    required double value,
+    required double min,
+    required double max,
+    required String display,
+    required VoidCallback onClose,
+    required Function(double) onChanged,
+    int? divisions,
+  }) {
     return Positioned(
-      bottom: 100, left: 16, right: 16,
+      bottom: 200,
+      left: 16,
+      right: 16,
       child: Material(
         color: Colors.transparent,
         child: Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white12)),
+          decoration: BoxDecoration(
+            color: Colors.black87,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white12),
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                const Text('ISO Control', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                GestureDetector(onTap: onToggleISOSlider, child: const Icon(Icons.close, color: Colors.white54, size: 20)),
-              ]),
-              const SizedBox(height: 12),
-              Row(children: [
-                Text('${minISO.toInt()}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                Expanded(
-                  child: SliderTheme(data: SliderTheme.of(context).copyWith(
-                    activeTrackColor: Colors.amber, inactiveTrackColor: Colors.white24, thumbColor: Colors.amber,
-                    overlayColor: Colors.amber.withOpacity(0.2),
-                  ), child: Slider(value: iso.clamp(minISO, maxISO), min: minISO, max: maxISO, divisions: 50, onChanged: onISOChanged)),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  GestureDetector(onTap: onClose, child: const Icon(Icons.close, color: Colors.white54, size: 20)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  activeTrackColor: Colors.amber,
+                  inactiveTrackColor: Colors.white24,
+                  thumbColor: Colors.amber,
+                  overlayColor: Colors.amber.withOpacity(0.2),
                 ),
-                Text('${maxISO.toInt()}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
-              ]),
-              Text('ISO ${iso.toInt()}', style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 16)),
+                child: Slider(
+                  value: value.clamp(min, max),
+                  min: min,
+                  max: max,
+                  divisions: divisions,
+                  onChanged: onChanged,
+                ),
+              ),
+              Text(display,
+                  style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 16)),
             ],
           ),
         ),
@@ -222,38 +304,116 @@ class ControlsOverlay extends StatelessWidget {
     );
   }
 
+  Widget _buildISOSliderPopup(BuildContext context) {
+    return _sliderPopup(
+      context: context,
+      title: 'ISO',
+      value: iso,
+      min: minISO,
+      max: maxISO,
+      display: 'ISO ${iso.toInt()}',
+      divisions: 50,
+      onClose: onToggleISOSlider,
+      onChanged: onISOChanged,
+    );
+  }
+
   Widget _buildEVSliderPopup(BuildContext context) {
+    return _sliderPopup(
+      context: context,
+      title: 'Exposure Bias (EV)',
+      value: exposureBias,
+      min: -4.0,
+      max: 4.0,
+      display: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV',
+      divisions: 32,
+      onClose: onToggleEVSlider,
+      onChanged: onExposureBiasChanged,
+    );
+  }
+
+  Widget _buildFocusSliderPopup(BuildContext context) {
+    return _sliderPopup(
+      context: context,
+      title: 'Manual Focus (0=∞, 1=macro)',
+      value: focus,
+      min: 0.0,
+      max: 1.0,
+      display: focus.toStringAsFixed(2),
+      divisions: 100,
+      onClose: onToggleFocusSlider,
+      onChanged: onFocusChanged,
+    );
+  }
+
+  Widget _buildZoomSliderPopup(BuildContext context) {
+    return _sliderPopup(
+      context: context,
+      title: 'Zoom',
+      value: zoom,
+      min: 1.0,
+      max: maxZoom,
+      display: '${zoom.toStringAsFixed(1)}x',
+      divisions: ((maxZoom - 1.0) * 10).round(),
+      onClose: onToggleZoomSlider,
+      onChanged: onZoomChanged,
+    );
+  }
+
+  Widget _buildShutterPickerPopup(BuildContext context) {
     return Positioned(
-      bottom: 100, left: 16, right: 16,
+      bottom: 200,
+      left: 16,
+      right: 16,
       child: Material(
         color: Colors.transparent,
         child: Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white12)),
+          decoration: BoxDecoration(
+            color: Colors.black87,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white12),
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                const Text('Exposure Compensation', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                GestureDetector(onTap: onToggleEVSlider, child: const Icon(Icons.close, color: Colors.white54, size: 20)),
-              ]),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Shutter Speed', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  GestureDetector(onTap: onToggleShutterPicker, child: const Icon(Icons.close, color: Colors.white54, size: 20)),
+                ],
+              ),
               const SizedBox(height: 12),
-              Row(children: [
-                const Text('-4', style: TextStyle(color: Colors.grey, fontSize: 11)),
-                Expanded(
-                  child: SliderTheme(data: SliderTheme.of(context).copyWith(
-                    activeTrackColor: Colors.amber, inactiveTrackColor: Colors.white24, thumbColor: Colors.amber,
-                    overlayColor: Colors.amber.withOpacity(0.2),
-                  ), child: Slider(value: exposureBias, min: -4.0, max: 4.0, divisions: 16, onChanged: onExposureBiasChanged)),
-                ),
-                const Text('+4', style: TextStyle(color: Colors.grey, fontSize: 11)),
-              ]),
-              GestureDetector(
-                onTap: () => onExposureBiasChanged(0),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(12)),
-                  child: Text('Reset (${exposureBias.toStringAsFixed(1)} EV)', style: const TextStyle(color: Colors.amber, fontSize: 14, fontWeight: FontWeight.bold)),
+              SizedBox(
+                height: 60,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: shutterSpeedValues.length,
+                  itemBuilder: (context, i) {
+                    final val = shutterSpeedValues[i];
+                    final label = val >= 1 ? '${val.toInt()}"' : '1/${(1 / val).round()}';
+                    final selected = label == shutterSpeed;
+                    return GestureDetector(
+                      onTap: () => onShutterSpeedChanged(val),
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: selected ? Colors.amber.withOpacity(0.3) : Colors.white10,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: selected ? Colors.amber : Colors.white24),
+                        ),
+                        child: Center(
+                          child: Text(label,
+                              style: TextStyle(
+                                color: selected ? Colors.amber : Colors.white70,
+                                fontWeight: FontWeight.bold,
+                              )),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ],

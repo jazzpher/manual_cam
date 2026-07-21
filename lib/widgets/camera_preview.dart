@@ -1,81 +1,64 @@
 import 'package:flutter/material.dart';
-import '../services/manual_camera.dart';
+import 'package:flutter/services.dart';
 
-class CameraPreview extends StatelessWidget {
-  final ManualCamera camera;
+/// Native iOS AVFoundation camera preview.
+/// Automatic na tama yung aspect ratio at pina-preserve ng videoGravity = resizeAspect.
+class NativeCameraPreview extends StatelessWidget {
   final String aspectRatio; // "4:3" | "16:9" | "1:1" | "3:2"
+  final void Function(double x, double y)? onTap;
 
-  const CameraPreview({
+  const NativeCameraPreview({
     super.key,
-    required this.camera,
     this.aspectRatio = '4:3',
+    this.onTap,
   });
 
-  /// Convert aspect ratio label to width/height (portrait).
-  double _aspectToRatio(String label) {
+  double _aspectValue(String label) {
     switch (label) {
       case '16:9':
-        return 9 / 16; // portrait: mas tall (0.5625)
+        return 9 / 16;
       case '1:1':
         return 1.0;
       case '3:2':
-        return 2 / 3; // portrait (0.667)
+        return 2 / 3;
       case '4:3':
       default:
-        return 3 / 4; // portrait (0.75) — native ng iPhone camera
+        return 3 / 4;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final double targetAspect = _aspectToRatio(aspectRatio);
-
-    if (camera.controller == null || !camera.controller!.value.isInitialized) {
-      return Container(
-        color: Colors.black,
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.amber),
-        ),
-      );
-    }
-
-    // Native aspect ratio ng camera sa portrait (~ 0.75 for 4:3)
-    final double nativeAspect = camera.nativePortraitAspectRatio ?? 0.75;
+    final target = _aspectValue(aspectRatio);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Compute preview box size na fit sa screen with target aspect ratio.
-        double previewW = constraints.maxWidth;
-        double previewH = previewW / targetAspect;
-
-        if (previewH > constraints.maxHeight) {
-          previewH = constraints.maxHeight;
-          previewW = previewH * targetAspect;
+        double w = constraints.maxWidth;
+        double h = w / target;
+        if (h > constraints.maxHeight) {
+          h = constraints.maxHeight;
+          w = h * target;
         }
 
         return Container(
           color: Colors.black,
           alignment: Alignment.center,
           child: SizedBox(
-            width: previewW,
-            height: previewH,
+            width: w,
+            height: h,
             child: ClipRect(
-              child: OverflowBox(
-                // Native camera aspect ratio (usually 4:3 = 0.75 portrait)
-                // Ilalagay natin yung camera preview sa native aspect nito,
-                // tapos ang ClipRect na wrapper ang mag-cro-crop sa target aspect.
-                alignment: Alignment.center,
-                maxWidth: double.infinity,
-                maxHeight: double.infinity,
-                child: FittedBox(
-                  fit: targetAspect > nativeAspect
-                      ? BoxFit.fitWidth // target is wider than native — fill width, crop top/bottom
-                      : BoxFit.fitHeight, // target is taller than native — fill height, crop sides
-                  child: SizedBox(
-                    width: 1000, // arbitrary base, actual sized by FittedBox
-                    height: 1000 / nativeAspect,
-                    child: camera.getPreviewWidget(),
-                  ),
+              child: GestureDetector(
+                onTapDown: (details) {
+                  if (onTap != null) {
+                    final localX = details.localPosition.dx / w;
+                    final localY = details.localPosition.dy / h;
+                    onTap!(localX.clamp(0.0, 1.0), localY.clamp(0.0, 1.0));
+                  }
+                },
+                child: const UiKitView(
+                  viewType: 'native_camera_preview',
+                  creationParams: null,
+                  creationParamsCodec: StandardMessageCodec(),
                 ),
               ),
             ),
@@ -84,22 +67,4 @@ class CameraPreview extends StatelessWidget {
       },
     );
   }
-}
-
-class GridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withOpacity(0.15)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.5;
-
-    canvas.drawLine(Offset(size.width / 3, 0), Offset(size.width / 3, size.height), paint);
-    canvas.drawLine(Offset(size.width * 2 / 3, 0), Offset(size.width * 2 / 3, size.height), paint);
-    canvas.drawLine(Offset(0, size.height / 3), Offset(size.width, size.height / 3), paint);
-    canvas.drawLine(Offset(0, size.height * 2 / 3), Offset(size.width, size.height * 2 / 3), paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

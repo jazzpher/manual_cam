@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'services/native_camera.dart';
 import 'widgets/camera_preview.dart';
 import 'widgets/controls_overlay.dart';
-import 'services/manual_camera.dart';
 
 void main() {
   runApp(const ManualCamApp());
@@ -34,15 +34,35 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> {
-  final ManualCamera _camera = ManualCamera();
+  final NativeCamera _camera = NativeCamera();
+
   bool _isInitialized = false;
-  bool _isRawEnabled = false;
+  String _statusMessage = 'Starting native camera...';
+
+  // Manual control state
   double _iso = 100;
   double _minISO = 24;
-  double _maxISO = 1600;
+  double _maxISO = 3200;
   String _shutterSpeed = '1/60';
+  double _shutterSeconds = 1 / 60;
   double _exposureBias = 0.0;
   double _zoom = 1.0;
+  double _maxZoom = 10.0;
+  double _focus = 0.5;
+  bool _isHDREnabled = false;
+  String _flashMode = 'off';
+  String _aspectRatio = '4:3';
+  bool _isCapturing = false;
+
+  // UI popups
+  bool _showISOSlider = false;
+  bool _showEVSlider = false;
+  bool _showShutterPicker = false;
+  bool _showFocusSlider = false;
+  bool _showZoomSlider = false;
+
+  // Tap-to-focus feedback
+  Offset? _tapFocusPoint;
 
   final List<double> _shutterSpeedValues = [
     1 / 8000, 1 / 4000, 1 / 2000, 1 / 1000, 1 / 500, 1 / 250,
@@ -50,13 +70,7 @@ class _CameraScreenState extends State<CameraScreen> {
     1, 2, 5, 10, 30,
   ];
 
-  String _aspectRatio = '4:3';
   final List<String> _aspectRatios = ['4:3', '16:9', '1:1', '3:2'];
-  bool _showISOSlider = false;
-  bool _showEVSlider = false;
-  bool _isCapturing = false;
-  String? _lastPhotoPath;
-  String _statusMessage = '';
 
   @override
   void initState() {
@@ -65,86 +79,87 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _initCamera() async {
-    setState(() {
-      _statusMessage = 'Initializing real camera...';
-    });
-
     try {
       await _camera.initialize();
-      final capabilities = await _camera.getCapabilities();
-
       setState(() {
-        _minISO = capabilities['minISO'] ?? 24.0;
-        _maxISO = capabilities['maxISO'] ?? 1600.0;
-        _isRawEnabled = capabilities['supportsRAW'] ?? false;
+        _minISO = _camera.minISO;
+        _maxISO = _camera.maxISO;
+        _maxZoom = _camera.maxZoom;
+        _iso = _iso.clamp(_minISO, _maxISO);
         _isInitialized = true;
         _statusMessage = '';
       });
     } catch (e) {
-      print('Camera init error: $e');
       setState(() {
-        _statusMessage = 'Error: $e\n\nPlease grant camera permission and restart the app.';
+        _statusMessage = 'Camera init failed:\n$e\n\nPlease grant camera permission in Settings.';
       });
     }
   }
 
-  double _aspectRatioToValue(String label) {
-    switch (label) {
-      case '16:9':
-        return 9 / 16;
-      case '1:1':
-        return 1.0;
-      case '3:2':
-        return 2 / 3;
-      case '4:3':
-      default:
-        return 3 / 4;
-    }
+  String _formatShutter(double s) {
+    if (s >= 1) return '${s.toInt()}"';
+    return '1/${(1 / s).round()}';
   }
 
-  Future<void> _setISO(double value) async {
-    await _camera.setISO(value);
-    setState(() => _iso = value);
+  Future<void> _setISO(double v) async {
+    setState(() => _iso = v);
+    await _camera.setISO(v);
   }
 
-  Future<void> _setShutterSpeed(double seconds) async {
-    await _camera.setShutterSpeed(seconds);
-    setState(() => _shutterSpeed = _formatShutterSpeed(seconds));
+  Future<void> _setShutter(double sec) async {
+    setState(() {
+      _shutterSeconds = sec;
+      _shutterSpeed = _formatShutter(sec);
+    });
+    await _camera.setShutterSpeed(sec);
   }
 
-  Future<void> _setExposureBias(double value) async {
-    await _camera.setExposureBias(value);
-    setState(() => _exposureBias = value);
+  Future<void> _setEV(double v) async {
+    setState(() => _exposureBias = v);
+    await _camera.setExposureBias(v);
   }
 
-  Future<void> _setZoom(double factor) async {
-    await _camera.setZoom(factor);
-    setState(() => _zoom = factor);
+  Future<void> _setZoom(double v) async {
+    setState(() => _zoom = v);
+    await _camera.setZoom(v);
+  }
+
+  Future<void> _setFocus(double v) async {
+    setState(() => _focus = v);
+    await _camera.setFocus(v);
+  }
+
+  Future<void> _setFlash(String mode) async {
+    setState(() => _flashMode = mode);
+    await _camera.setFlashMode(mode);
+  }
+
+  Future<void> _toggleHDR() async {
+    setState(() => _isHDREnabled = !_isHDREnabled);
+    await _camera.setHDR(_isHDREnabled);
+  }
+
+  Future<void> _onPreviewTap(double x, double y) async {
+    setState(() {
+      _tapFocusPoint = Offset(x, y);
+    });
+    await _camera.focusAtPoint(x, y);
+    // Clear reticle after animation
+    Future.delayed(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _tapFocusPoint = null);
+    });
   }
 
   Future<void> _capturePhoto() async {
     if (_isCapturing) return;
-
-    setState(() {
-      _isCapturing = true;
-      _statusMessage = 'Capturing...';
-    });
+    setState(() => _isCapturing = true);
 
     try {
-      final path = await _camera.capturePhoto(
-        raw: _isRawEnabled,
-        portraitAspectRatio: _aspectRatioToValue(_aspectRatio),
-      );
-
+      await _camera.capturePhoto();
       if (mounted) {
-        setState(() {
-          _lastPhotoPath = path;
-          _statusMessage = '';
-        });
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('📸 Saved to Photos app (album: ManualCam)'),
+            content: const Text('📸 Saved to Photos (album: ManualCam)'),
             backgroundColor: Colors.green.shade700,
             duration: const Duration(seconds: 2),
           ),
@@ -154,27 +169,24 @@ class _CameraScreenState extends State<CameraScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Capture Error: $e'),
+            content: Text('Capture error: $e'),
             backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
           ),
         );
-        setState(() => _statusMessage = '');
       }
     }
 
     if (mounted) setState(() => _isCapturing = false);
   }
 
-  String _formatShutterSpeed(double seconds) {
-    if (seconds >= 1) return '${seconds.toInt()}"';
-    return '1/${(1 / seconds).round()}';
-  }
-
-  @override
-  void dispose() {
-    _camera.dispose();
-    super.dispose();
+  void _closeAllPopups() {
+    setState(() {
+      _showISOSlider = false;
+      _showEVSlider = false;
+      _showShutterPicker = false;
+      _showFocusSlider = false;
+      _showZoomSlider = false;
+    });
   }
 
   @override
@@ -188,19 +200,19 @@ class _CameraScreenState extends State<CameraScreen> {
             children: [
               const CircularProgressIndicator(color: Colors.amber),
               const SizedBox(height: 24),
-              Text(
-                _statusMessage.isEmpty ? 'Initializing real camera...' : _statusMessage,
-                style: const TextStyle(color: Colors.white70),
-                textAlign: TextAlign.center,
-              ),
-              if (_statusMessage.contains('permission'))
-                Padding(
-                  padding: const EdgeInsets.only(top: 20),
-                  child: ElevatedButton(
-                    onPressed: _initCamera,
-                    child: const Text('Retry Camera Init'),
-                  ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Text(
+                  _statusMessage,
+                  style: const TextStyle(color: Colors.white70),
+                  textAlign: TextAlign.center,
                 ),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _initCamera,
+                child: const Text('Retry'),
+              ),
             ],
           ),
         ),
@@ -211,21 +223,25 @@ class _CameraScreenState extends State<CameraScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Real camera preview na may correct aspect ratio (no distortion)
+          // Native camera preview (tap to focus)
           Positioned.fill(
-            child: CameraPreview(
-              camera: _camera,
+            child: NativeCameraPreview(
               aspectRatio: _aspectRatio,
+              onTap: _onPreviewTap,
             ),
           ),
 
-          // Bottom gradient for controls
+          // Tap-to-focus reticle
+          if (_tapFocusPoint != null)
+            _buildFocusReticle(_tapFocusPoint!),
+
+          // Bottom gradient
           Positioned(
             bottom: 0,
             left: 0,
             right: 0,
             child: Container(
-              height: 260,
+              height: 320,
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -245,45 +261,50 @@ class _CameraScreenState extends State<CameraScreen> {
             shutterSpeedValues: _shutterSpeedValues,
             exposureBias: _exposureBias,
             zoom: _zoom,
+            maxZoom: _maxZoom,
+            focus: _focus,
             aspectRatio: _aspectRatio,
             aspectRatios: _aspectRatios,
-            isRawEnabled: _isRawEnabled,
+            flashMode: _flashMode,
+            isHDREnabled: _isHDREnabled,
             isCapturing: _isCapturing,
             onISOChanged: _setISO,
-            onShutterSpeedChanged: _setShutterSpeed,
-            onExposureBiasChanged: _setExposureBias,
+            onShutterSpeedChanged: _setShutter,
+            onExposureBiasChanged: _setEV,
             onZoomChanged: _setZoom,
-            onAspectRatioChanged: (ratio) => setState(() => _aspectRatio = ratio),
+            onFocusChanged: _setFocus,
+            onAspectRatioChanged: (r) => setState(() => _aspectRatio = r),
+            onFlashModeChanged: _setFlash,
             onCapture: _capturePhoto,
-            onToggleRaw: (value) => setState(() => _isRawEnabled = value),
+            onToggleHDR: _toggleHDR,
             showISOSlider: _showISOSlider,
-            onToggleISOSlider: () => setState(() => _showISOSlider = !_showISOSlider),
+            onToggleISOSlider: () {
+              _closeAllPopups();
+              setState(() => _showISOSlider = !_showISOSlider);
+            },
             showEVSlider: _showEVSlider,
-            onToggleEVSlider: () => setState(() => _showEVSlider = !_showEVSlider),
+            onToggleEVSlider: () {
+              _closeAllPopups();
+              setState(() => _showEVSlider = !_showEVSlider);
+            },
+            showShutterPicker: _showShutterPicker,
+            onToggleShutterPicker: () {
+              _closeAllPopups();
+              setState(() => _showShutterPicker = !_showShutterPicker);
+            },
+            showFocusSlider: _showFocusSlider,
+            onToggleFocusSlider: () {
+              _closeAllPopups();
+              setState(() => _showFocusSlider = !_showFocusSlider);
+            },
+            showZoomSlider: _showZoomSlider,
+            onToggleZoomSlider: () {
+              _closeAllPopups();
+              setState(() => _showZoomSlider = !_showZoomSlider);
+            },
           ),
 
-          // Status banner
-          if (_statusMessage.isNotEmpty)
-            Positioned(
-              top: 60,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.amber.withOpacity(0.5)),
-                ),
-                child: Text(
-                  _statusMessage,
-                  style: const TextStyle(color: Colors.amber, fontSize: 13),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-
-          // Info badge
+          // Top-right label
           Positioned(
             top: 40,
             right: 12,
@@ -294,7 +315,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                '$_aspectRatio · REAL',
+                '$_aspectRatio · NATIVE',
                 style: const TextStyle(
                   color: Colors.amber,
                   fontSize: 10,
@@ -305,6 +326,33 @@ class _CameraScreenState extends State<CameraScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildFocusReticle(Offset point) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // The tap point is relative to the preview widget, not the whole screen.
+        // For simplicity, we approximate center-position on the screen.
+        return Center(
+          child: TweenAnimationBuilder<double>(
+            key: ValueKey(point),
+            tween: Tween<double>(begin: 1.5, end: 1.0),
+            duration: const Duration(milliseconds: 300),
+            builder: (context, scale, _) => Transform.scale(
+              scale: scale,
+              child: Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.amber, width: 2),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
