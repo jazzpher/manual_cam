@@ -67,6 +67,20 @@ class SceneDelegate: FlutterSceneDelegate {
                     result(FlutterError(code: "ARG", message: "factor required", details: nil)); return
                 }
                 mgr.setZoom(CGFloat(z)) { ok in result(ok) }
+            case "setFrameMode":
+                let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
+                mgr.setFrameMode(enabled) { ok in result(ok) }
+            case "captureVideoFrame":
+                mgr.captureVideoFrame { r in
+                    switch r {
+                    case .success(let paths): result(paths)
+                    case .failure(let e): result(FlutterError(
+                        code: "FRAME_CAPTURE_FAIL",
+                        message: e.localizedDescription,
+                        details: nil
+                    ))
+                    }
+                }
             case "setNatural48Mode":
                 let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
                 mgr.setNatural48Mode(enabled) { ok in result(ok) }

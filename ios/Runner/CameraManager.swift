@@ -12,10 +12,15 @@ class CameraManager: NSObject {
     private var device: AVCaptureDevice?
     private var input: AVCaptureDeviceInput?
     private var photoOutput = AVCapturePhotoOutput()
+    private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
+    private let videoFrameQueue = DispatchQueue(label: "camera.video.frame.queue")
+    private let videoFrameLock = NSLock()
+    private var latestVideoPixelBuffer: CVPixelBuffer?
     private var isHDREnabled = false
     private var isRawEnabled = false
     private var isNatural48Enabled = false
+    private var isFrameModeEnabled = false
     private var flashMode: AVCaptureDevice.FlashMode = .off
     private var lastPhotoCompletion: ((Result<[String: String], Error>) -> Void)?
 
@@ -32,12 +37,12 @@ class CameraManager: NSObject {
     private var currentPhysicalOrientation: UIDeviceOrientation = .portrait
 
     // Core Image context — reusable, Metal GPU-accelerated
-    // Configured for wide gamut internal processing, sRGB output for JPEG
+    // Configured for wide-gamut Display P3 frame rendering
     private let ciContext: CIContext = {
         return CIContext(options: [
             .useSoftwareRenderer: false,
             .workingColorSpace: CGColorSpace(name: CGColorSpace.displayP3)!,
-            .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
+            .outputColorSpace: CGColorSpace(name: CGColorSpace.displayP3)!,
         ])
     }()
 
@@ -70,6 +75,19 @@ class CameraManager: NSObject {
                     if #available(iOS 13.0, *) {
                         self.photoOutput.maxPhotoQualityPrioritization = .quality
                     }
+                }
+
+                self.videoOutput.alwaysDiscardsLateVideoFrames = true
+                self.videoOutput.videoSettings = [
+                    kCVPixelBufferPixelFormatTypeKey as String:
+                        Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
+                ]
+                self.videoOutput.setSampleBufferDelegate(
+                    self,
+                    queue: self.videoFrameQueue
+                )
+                if self.session.canAddOutput(self.videoOutput) {
+                    self.session.addOutput(self.videoOutput)
                 }
 
                 self.session.commitConfiguration()
@@ -105,6 +123,13 @@ class CameraManager: NSObject {
 
             if newOrientation != self.currentPhysicalOrientation {
                 self.currentPhysicalOrientation = newOrientation
+                let videoOrientation = self.videoOrientation(for: newOrientation)
+                self.sessionQueue.async {
+                    if let connection = self.videoOutput.connection(with: .video),
+                       connection.isVideoOrientationSupported {
+                        connection.videoOrientation = videoOrientation
+                    }
+                }
             }
         }
     }
@@ -225,7 +250,7 @@ class CameraManager: NSObject {
                     d.focusPointOfInterest = point
                     d.focusMode = .autoFocus
                 }
-                if d.isExposurePointOfInterestSupported {
+                if !self.isFrameModeEnabled && d.isExposurePointOfInterestSupported {
                     d.exposurePointOfInterest = point
                     d.exposureMode = .continuousAutoExposure
                 }
@@ -255,13 +280,62 @@ class CameraManager: NSObject {
         }
     }
 
+    func setFrameMode(_ enabled: Bool, completion: @escaping (Bool) -> Void) {
+        guard let d = device else { completion(false); return }
+
+        sessionQueue.async {
+            self.session.beginConfiguration()
+            if enabled && self.session.canSetSessionPreset(.hd4K3840x2160) {
+                self.session.sessionPreset = .hd4K3840x2160
+            } else {
+                self.session.sessionPreset = .photo
+            }
+            self.session.commitConfiguration()
+
+            let orientation = self.videoOrientation(for: self.currentPhysicalOrientation)
+            if let connection = self.videoOutput.connection(with: .video),
+               connection.isVideoOrientationSupported {
+                connection.videoOrientation = orientation
+            }
+
+            do {
+                try d.lockForConfiguration()
+                self.isFrameModeEnabled = enabled
+                self.isNatural48Enabled = false
+                self.isRawEnabled = false
+                self.softwareZoomFactor = 1.0
+                d.videoZoomFactor = 1.0
+                self.flashMode = .off
+                self.isHDREnabled = false
+                d.unlockForConfiguration()
+
+                if !enabled {
+                    self.videoFrameLock.lock()
+                    self.latestVideoPixelBuffer = nil
+                    self.videoFrameLock.unlock()
+                }
+                completion(true)
+            } catch {
+                print("⚠️ 4K Frame mode error: \(error)")
+                completion(false)
+            }
+        }
+    }
+
     func setNatural48Mode(_ enabled: Bool, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
 
         sessionQueue.async {
+            if self.isFrameModeEnabled {
+                self.session.beginConfiguration()
+                self.session.sessionPreset = .photo
+                self.session.commitConfiguration()
+            }
+
             do {
                 try d.lockForConfiguration()
 
+                self.isFrameModeEnabled = false
                 self.isNatural48Enabled = enabled
                 self.isRawEnabled = false
 
@@ -303,11 +377,20 @@ class CameraManager: NSObject {
     }
 
     func setRAW(_ enabled: Bool) {
-        isRawEnabled = enabled
-        if enabled { isNatural48Enabled = false }
         guard let d = device else { return }
 
         sessionQueue.async {
+            if self.isFrameModeEnabled {
+                self.session.beginConfiguration()
+                self.session.sessionPreset = .photo
+                self.session.commitConfiguration()
+            }
+            self.isRawEnabled = enabled
+            if enabled {
+                self.isNatural48Enabled = false
+                self.isFrameModeEnabled = false
+            }
+
             do {
                 try d.lockForConfiguration()
                 if enabled {
@@ -338,6 +421,99 @@ class CameraManager: NSObject {
     var isInRawMode: Bool { isRawEnabled }
 
     // MARK: - Capture
+
+    func captureVideoFrame(completion: @escaping (Result<[String: String], Error>) -> Void) {
+        videoFrameQueue.async {
+            self.videoFrameLock.lock()
+            let pixelBuffer = self.latestVideoPixelBuffer
+            self.videoFrameLock.unlock()
+
+            guard self.isFrameModeEnabled, let pixelBuffer = pixelBuffer else {
+                let error = NSError(
+                    domain: "Camera",
+                    code: 20,
+                    userInfo: [NSLocalizedDescriptionKey: "4K video frame is not ready"]
+                )
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+
+            var image = CIImage(cvPixelBuffer: pixelBuffer)
+            let orientation = self.currentPhysicalOrientation
+            let isPortrait = orientation == .portrait || orientation == .portraitUpsideDown
+            let outputSize = isPortrait
+                ? CGSize(width: 2160, height: 3840)
+                : CGSize(width: 3840, height: 2160)
+
+            let extent = image.extent
+            let targetAspect = outputSize.width / outputSize.height
+            let sourceAspect = extent.width / extent.height
+            var cropRect = extent
+
+            if sourceAspect > targetAspect {
+                let width = extent.height * targetAspect
+                cropRect = CGRect(
+                    x: extent.midX - width / 2.0,
+                    y: extent.minY,
+                    width: width,
+                    height: extent.height
+                )
+            } else if sourceAspect < targetAspect {
+                let height = extent.width / targetAspect
+                cropRect = CGRect(
+                    x: extent.minX,
+                    y: extent.midY - height / 2.0,
+                    width: extent.width,
+                    height: height
+                )
+            }
+
+            image = image
+                .cropped(to: cropRect)
+                .transformed(by: CGAffineTransform(
+                    translationX: -cropRect.minX,
+                    y: -cropRect.minY
+                ))
+                .transformed(by: CGAffineTransform(
+                    scaleX: outputSize.width / cropRect.width,
+                    y: outputSize.height / cropRect.height
+                ))
+
+            let outputRect = CGRect(origin: .zero, size: outputSize)
+            let p3 = CGColorSpace(name: CGColorSpace.displayP3)!
+            guard let cgImage = self.ciContext.createCGImage(
+                image,
+                from: outputRect,
+                format: .RGBA8,
+                colorSpace: p3
+            ), let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.95) else {
+                let error = NSError(
+                    domain: "Camera",
+                    code: 21,
+                    userInfo: [NSLocalizedDescriptionKey: "Unable to render 4K video frame"]
+                )
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+
+            let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+            let filename = "manualcam_\(timestamp)_4kframe.jpg"
+            let path = (NSTemporaryDirectory() as NSString)
+                .appendingPathComponent(filename)
+
+            do {
+                try jpegData.write(to: URL(fileURLWithPath: path))
+                let result = [
+                    "jpeg": path,
+                    "_softwareZoom": String(format: "%.2f", self.softwareZoomFactor),
+                    "mode": "4kFrame"
+                ]
+                DispatchQueue.main.async { completion(.success(result)) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
 
     func capturePhoto(completion: @escaping (Result<[String: String], Error>) -> Void) {
         sessionQueue.async {
@@ -447,6 +623,21 @@ class CameraManager: NSObject {
 
     deinit {
         motionManager.stopAccelerometerUpdates()
+    }
+}
+
+// MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
+
+extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
+    func captureOutput(_ output: AVCaptureOutput,
+                       didOutput sampleBuffer: CMSampleBuffer,
+                       from connection: AVCaptureConnection) {
+        guard isFrameModeEnabled,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        videoFrameLock.lock()
+        latestVideoPixelBuffer = pixelBuffer
+        videoFrameLock.unlock()
     }
 }
 

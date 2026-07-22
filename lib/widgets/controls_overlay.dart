@@ -9,7 +9,11 @@ class ControlsOverlay extends StatelessWidget {
   final String shutterSpeed, aspectRatio, flashMode;
   final List<double> shutterSpeedValues;
   final List<String> aspectRatios;
-  final bool isHDREnabled, isRawEnabled, isNatural48Enabled, isCapturing;
+  final bool isHDREnabled,
+      isRawEnabled,
+      isNatural48Enabled,
+      isFrameModeEnabled,
+      isCapturing;
   final int uiOrientation;
   final SettingType activeDial;
   final Function(double) onISOChanged,
@@ -19,7 +23,11 @@ class ControlsOverlay extends StatelessWidget {
       onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
   final Function(SettingType) onSelectDial;
-  final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleNatural48;
+  final VoidCallback onCapture,
+      onToggleHDR,
+      onToggleRAW,
+      onToggleNatural48,
+      onToggleFrameMode;
 
   const ControlsOverlay({
     super.key,
@@ -38,6 +46,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.isHDREnabled,
     required this.isRawEnabled,
     required this.isNatural48Enabled,
+    required this.isFrameModeEnabled,
     required this.isCapturing,
     required this.uiOrientation,
     required this.activeDial,
@@ -53,6 +62,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onToggleHDR,
     required this.onToggleRAW,
     required this.onToggleNatural48,
+    required this.onToggleFrameMode,
   });
 
   double get _rotationAngle {
@@ -104,14 +114,16 @@ class ControlsOverlay extends StatelessWidget {
       child: Row(
         children: [
           GestureDetector(
-            onTap: () {
-              final next = flashMode == 'off'
-                  ? 'on'
-                  : flashMode == 'on'
-                  ? 'auto'
-                  : 'off';
-              onFlashModeChanged(next);
-            },
+            onTap: isFrameModeEnabled
+                ? null
+                : () {
+                    final next = flashMode == 'off'
+                        ? 'on'
+                        : flashMode == 'on'
+                        ? 'auto'
+                        : 'off';
+                    onFlashModeChanged(next);
+                  },
             child: _rotate(
               _pill(
                 icon: flashMode == 'off'
@@ -152,6 +164,19 @@ class ControlsOverlay extends StatelessWidget {
                 icon: Icons.camera_alt_outlined,
                 label: '48MM',
                 color: isNatural48Enabled ? Colors.amber : Colors.grey,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: onToggleFrameMode,
+            child: _rotate(
+              _pill(
+                icon: Icons.videocam_outlined,
+                label: 'FRAME',
+                color: isFrameModeEnabled
+                    ? Colors.lightBlueAccent
+                    : Colors.grey,
               ),
             ),
           ),
@@ -200,7 +225,9 @@ class ControlsOverlay extends StatelessWidget {
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 3),
             child: GestureDetector(
-              onTap: () => onAspectRatioChanged(ratio),
+              onTap: isFrameModeEnabled
+                  ? null
+                  : () => onAspectRatioChanged(ratio),
               child: _rotate(
                 Container(
                   padding: const EdgeInsets.symmetric(

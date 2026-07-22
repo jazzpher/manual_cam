@@ -8,9 +8,9 @@ import 'widgets/controls_overlay.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-  ]).then((_) {
+  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]).then((
+    _,
+  ) {
     runApp(const ManualCamApp());
   });
 }
@@ -59,6 +59,7 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isHDREnabled = false;
   bool _isRawEnabled = false;
   bool _isNatural48Enabled = false;
+  bool _isFrameModeEnabled = false;
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
@@ -74,9 +75,24 @@ class _CameraScreenState extends State<CameraScreen> {
   Timer? _orientationPollTimer;
 
   final List<double> _shutterSpeedValues = [
-    1 / 8000, 1 / 4000, 1 / 2000, 1 / 1000, 1 / 500, 1 / 250,
-    1 / 125, 1 / 60, 1 / 30, 1 / 15, 1 / 8, 1 / 4, 1 / 2,
-    1, 2, 5, 10, 30,
+    1 / 8000,
+    1 / 4000,
+    1 / 2000,
+    1 / 1000,
+    1 / 500,
+    1 / 250,
+    1 / 125,
+    1 / 60,
+    1 / 30,
+    1 / 15,
+    1 / 8,
+    1 / 4,
+    1 / 2,
+    1,
+    2,
+    5,
+    10,
+    30,
   ];
 
   final List<String> _aspectRatios = ['4:3', '16:9', '1:1', '3:2'];
@@ -102,13 +118,16 @@ class _CameraScreenState extends State<CameraScreen> {
       });
     } catch (e) {
       setState(() {
-        _statusMessage = 'Camera init failed:\n$e\n\nPlease grant camera permission in Settings.';
+        _statusMessage =
+            'Camera init failed:\n$e\n\nPlease grant camera permission in Settings.';
       });
     }
   }
 
   void _startOrientationPolling() {
-    _orientationPollTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
+    _orientationPollTimer = Timer.periodic(const Duration(milliseconds: 300), (
+      _,
+    ) async {
       try {
         final code = await _camera.getCurrentOrientationCode();
         if (code != _uiOrientation && mounted) {
@@ -158,11 +177,23 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _toggleHDR() async {
+    if (_isFrameModeEnabled) return;
     setState(() => _isHDREnabled = !_isHDREnabled);
     await _camera.setHDR(_isHDREnabled);
   }
 
   Future<void> _toggleRAW() async {
+    if (_isFrameModeEnabled) {
+      await _camera.setFrameMode(false);
+      if (mounted) {
+        setState(() {
+          _isFrameModeEnabled = false;
+          _aspectRatio = '4:3';
+          _zoom = 1.0;
+        });
+      }
+    }
+
     if (_isNatural48Enabled) {
       await _camera.setNatural48Mode(false);
       if (mounted) {
@@ -189,7 +220,48 @@ class _CameraScreenState extends State<CameraScreen> {
     await _camera.setRAW(_isRawEnabled);
   }
 
+  Future<void> _toggleFrameMode() async {
+    final enable = !_isFrameModeEnabled;
+    final success = await _camera.setFrameMode(enable);
+    if (!mounted) return;
+
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to switch 4K Frame mode'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isFrameModeEnabled = enable;
+      _isNatural48Enabled = false;
+      _isRawEnabled = false;
+      _isHDREnabled = false;
+      _flashMode = 'off';
+      _zoom = 1.0;
+      _aspectRatio = enable ? '16:9' : '4:3';
+      _activeDial = SettingType.none;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          enable
+              ? '4K Frame ON · 3840×2160 · Manual controls'
+              : '4K Frame OFF · Photo mode restored',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   Future<void> _toggleNatural48() async {
+    if (_isFrameModeEnabled) {
+      await _camera.setFrameMode(false);
+    }
     final enable = !_isNatural48Enabled;
     final success = await _camera.setNatural48Mode(enable);
     if (!mounted) return;
@@ -206,6 +278,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
     setState(() {
       _isNatural48Enabled = enable;
+      _isFrameModeEnabled = false;
       _isRawEnabled = false;
       _isHDREnabled = false;
       _flashMode = 'off';
@@ -245,14 +318,18 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() => _isCapturing = true);
 
     try {
-      final paths = await _camera.capturePhoto();
+      final paths = _isFrameModeEnabled
+          ? await _camera.captureVideoFrame()
+          : await _camera.capturePhoto();
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
         final hasRaw = paths.containsKey('raw');
         final zoom = paths['zoom'] ?? '1.0';
         final zoomLabel = zoom == '1.0' ? '' : ' (${zoom}x)';
-        final message = hasRaw
+        final message = _isFrameModeEnabled
+            ? '🎞️ 4K video frame saved$zoomLabel'
+            : hasRaw
             ? '📸 RAW + JPEG saved$zoomLabel'
             : '📸 JPEG saved$zoomLabel';
 
@@ -288,6 +365,7 @@ class _CameraScreenState extends State<CameraScreen> {
       parts.add('JPEG');
     }
     if (_isNatural48Enabled) parts.add('48MM NATURAL');
+    if (_isFrameModeEnabled) parts.add('4K FRAME');
     return parts.join(' · ');
   }
 
@@ -373,6 +451,7 @@ class _CameraScreenState extends State<CameraScreen> {
             isHDREnabled: _isHDREnabled,
             isRawEnabled: _isRawEnabled,
             isNatural48Enabled: _isNatural48Enabled,
+            isFrameModeEnabled: _isFrameModeEnabled,
             isCapturing: _isCapturing,
             uiOrientation: _uiOrientation,
             activeDial: _activeDial,
@@ -388,6 +467,7 @@ class _CameraScreenState extends State<CameraScreen> {
             onToggleHDR: _toggleHDR,
             onToggleRAW: _toggleRAW,
             onToggleNatural48: _toggleNatural48,
+            onToggleFrameMode: _toggleFrameMode,
           ),
 
           Positioned(

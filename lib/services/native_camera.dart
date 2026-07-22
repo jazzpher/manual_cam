@@ -14,8 +14,10 @@ class NativeCamera {
 
   double get minISO => (_capabilities['minISO'] as num?)?.toDouble() ?? 24.0;
   double get maxISO => (_capabilities['maxISO'] as num?)?.toDouble() ?? 3200.0;
-  double get minShutter => (_capabilities['minExposureDuration'] as num?)?.toDouble() ?? (1 / 8000);
-  double get maxShutter => (_capabilities['maxExposureDuration'] as num?)?.toDouble() ?? 1.0;
+  double get minShutter =>
+      (_capabilities['minExposureDuration'] as num?)?.toDouble() ?? (1 / 8000);
+  double get maxShutter =>
+      (_capabilities['maxExposureDuration'] as num?)?.toDouble() ?? 1.0;
   double get maxZoom => (_capabilities['maxZoom'] as num?)?.toDouble() ?? 10.0;
   bool get supportsHDR => _capabilities['supportsHDR'] as bool? ?? false;
   bool get supportsRAW => _capabilities['supportsRAW'] as bool? ?? false;
@@ -29,7 +31,9 @@ class NativeCamera {
     }
 
     try {
-      final Map<Object?, Object?>? result = await _channel.invokeMethod('setup');
+      final Map<Object?, Object?>? result = await _channel.invokeMethod(
+        'setup',
+      );
       if (result == null) throw Exception('Setup returned null');
       _capabilities = result.map((k, v) => MapEntry(k.toString(), v));
       _initialized = true;
@@ -40,41 +44,70 @@ class NativeCamera {
   }
 
   Future<void> setISO(double iso) async {
-    try { await _channel.invokeMethod('setISO', {'iso': iso}); }
-    catch (e) { print('setISO error: $e'); }
+    try {
+      await _channel.invokeMethod('setISO', {'iso': iso});
+    } catch (e) {
+      print('setISO error: $e');
+    }
   }
 
   Future<void> setShutterSpeed(double seconds) async {
-    try { await _channel.invokeMethod('setShutterSpeed', {'seconds': seconds}); }
-    catch (e) { print('setShutterSpeed error: $e'); }
+    try {
+      await _channel.invokeMethod('setShutterSpeed', {'seconds': seconds});
+    } catch (e) {
+      print('setShutterSpeed error: $e');
+    }
   }
 
   Future<void> setExposureBias(double bias) async {
-    try { await _channel.invokeMethod('setExposureBias', {'bias': bias}); }
-    catch (e) { print('setExposureBias error: $e'); }
+    try {
+      await _channel.invokeMethod('setExposureBias', {'bias': bias});
+    } catch (e) {
+      print('setExposureBias error: $e');
+    }
   }
 
   Future<void> setFocus(double position) async {
-    try { await _channel.invokeMethod('setFocus', {'position': position}); }
-    catch (e) { print('setFocus error: $e'); }
+    try {
+      await _channel.invokeMethod('setFocus', {'position': position});
+    } catch (e) {
+      print('setFocus error: $e');
+    }
   }
 
   Future<void> focusAtPoint(double x, double y) async {
-    try { await _channel.invokeMethod('focusAtPoint', {'x': x, 'y': y}); }
-    catch (e) { print('focusAtPoint error: $e'); }
+    try {
+      await _channel.invokeMethod('focusAtPoint', {'x': x, 'y': y});
+    } catch (e) {
+      print('focusAtPoint error: $e');
+    }
   }
 
   Future<void> setZoom(double factor) async {
-    try { await _channel.invokeMethod('setZoom', {'factor': factor}); }
-    catch (e) { print('setZoom error: $e'); }
+    try {
+      await _channel.invokeMethod('setZoom', {'factor': factor});
+    } catch (e) {
+      print('setZoom error: $e');
+    }
+  }
+
+  Future<bool> setFrameMode(bool enabled) async {
+    try {
+      final result = await _channel.invokeMethod('setFrameMode', {
+        'enabled': enabled,
+      });
+      return result == true;
+    } catch (e) {
+      print('setFrameMode error: $e');
+      return false;
+    }
   }
 
   Future<bool> setNatural48Mode(bool enabled) async {
     try {
-      final result = await _channel.invokeMethod(
-        'setNatural48Mode',
-        {'enabled': enabled},
-      );
+      final result = await _channel.invokeMethod('setNatural48Mode', {
+        'enabled': enabled,
+      });
       return result == true;
     } catch (e) {
       print('setNatural48Mode error: $e');
@@ -83,18 +116,27 @@ class NativeCamera {
   }
 
   Future<void> setFlashMode(String mode) async {
-    try { await _channel.invokeMethod('setFlashMode', {'mode': mode}); }
-    catch (e) { print('setFlashMode error: $e'); }
+    try {
+      await _channel.invokeMethod('setFlashMode', {'mode': mode});
+    } catch (e) {
+      print('setFlashMode error: $e');
+    }
   }
 
   Future<void> setHDR(bool enabled) async {
-    try { await _channel.invokeMethod('setHDR', {'enabled': enabled}); }
-    catch (e) { print('setHDR error: $e'); }
+    try {
+      await _channel.invokeMethod('setHDR', {'enabled': enabled});
+    } catch (e) {
+      print('setHDR error: $e');
+    }
   }
 
   Future<void> setRAW(bool enabled) async {
-    try { await _channel.invokeMethod('setRAW', {'enabled': enabled}); }
-    catch (e) { print('setRAW error: $e'); }
+    try {
+      await _channel.invokeMethod('setRAW', {'enabled': enabled});
+    } catch (e) {
+      print('setRAW error: $e');
+    }
   }
 
   Future<int> getCurrentOrientationCode() async {
@@ -108,9 +150,14 @@ class NativeCamera {
 
   /// Regular capture. The DNG/RAW stays untouched for editing.
   /// A RAW companion JPEG may be center-cropped on the native GPU for zoom.
-  Future<Map<String, String>> capturePhoto() async {
+  Future<Map<String, String>> capturePhoto() => _captureAndSave('capturePhoto');
+
+  Future<Map<String, String>> captureVideoFrame() =>
+      _captureAndSave('captureVideoFrame');
+
+  Future<Map<String, String>> _captureAndSave(String method) async {
     try {
-      final result = await _channel.invokeMethod('capturePhoto');
+      final result = await _channel.invokeMethod(method);
       if (result == null) throw Exception('Capture returned null');
 
       final Map<String, String> paths = {};
@@ -141,12 +188,14 @@ class NativeCamera {
         if (paths['raw'] != null) {
           await Gal.putImage(paths['raw']!, album: 'ManualCam');
         }
-      } catch (e) { print('❌ Photos save error: $e'); }
+      } catch (e) {
+        print('❌ Photos save error: $e');
+      }
 
       paths['zoom'] = softwareZoom.toStringAsFixed(1);
       return paths;
     } on PlatformException catch (e) {
-      throw Exception('Capture failed: ${e.message}');
+      throw Exception('$method failed: ${e.message}');
     }
   }
 }
