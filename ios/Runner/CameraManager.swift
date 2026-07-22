@@ -47,7 +47,7 @@ class CameraManager: NSObject {
                     self.photoOutput.isHighResolutionCaptureEnabled = true
 
                     if #available(iOS 13.0, *) {
-                        self.photoOutput.maxPhotoQualityPrioritization = .balanced
+                        self.photoOutput.maxPhotoQualityPrioritization = .quality
                     }
                 }
 
@@ -65,6 +65,8 @@ class CameraManager: NSObject {
     func getCapabilities() -> [String: Any] {
         guard let d = device else { return [:] }
         let rawSupported = !photoOutput.availableRawPhotoPixelFormatTypes.isEmpty
+        let rawFormats = photoOutput.availableRawPhotoPixelFormatTypes.map { "\($0)" }
+        print("📸 Available RAW formats: \(rawFormats)")
 
         return [
             "minISO": d.activeFormat.minISO,
@@ -90,9 +92,7 @@ class CameraManager: NSObject {
                 d.setExposureModeCustom(duration: currentDur, iso: clamped, completionHandler: nil)
                 d.unlockForConfiguration()
                 completion(true)
-            } catch {
-                completion(false)
-            }
+            } catch { completion(false) }
         }
     }
 
@@ -109,9 +109,7 @@ class CameraManager: NSObject {
                 d.setExposureModeCustom(duration: clamped, iso: currentISO, completionHandler: nil)
                 d.unlockForConfiguration()
                 completion(true)
-            } catch {
-                completion(false)
-            }
+            } catch { completion(false) }
         }
     }
 
@@ -127,9 +125,7 @@ class CameraManager: NSObject {
                 d.setExposureTargetBias(clamped, completionHandler: nil)
                 d.unlockForConfiguration()
                 completion(true)
-            } catch {
-                completion(false)
-            }
+            } catch { completion(false) }
         }
     }
 
@@ -146,9 +142,7 @@ class CameraManager: NSObject {
                 }
                 d.unlockForConfiguration()
                 completion(true)
-            } catch {
-                completion(false)
-            }
+            } catch { completion(false) }
         }
     }
 
@@ -168,9 +162,7 @@ class CameraManager: NSObject {
                 }
                 d.unlockForConfiguration()
                 completion(true)
-            } catch {
-                completion(false)
-            }
+            } catch { completion(false) }
         }
     }
 
@@ -183,9 +175,7 @@ class CameraManager: NSObject {
                 d.videoZoomFactor = clamped
                 d.unlockForConfiguration()
                 completion(true)
-            } catch {
-                completion(false)
-            }
+            } catch { completion(false) }
         }
     }
 
@@ -197,14 +187,10 @@ class CameraManager: NSObject {
         }
     }
 
-    func setHDR(_ enabled: Bool) {
-        isHDREnabled = enabled
-    }
+    func setHDR(_ enabled: Bool) { isHDREnabled = enabled }
+    func setRAW(_ enabled: Bool) { isRawEnabled = enabled }
 
-    func setRAW(_ enabled: Bool) {
-        isRawEnabled = enabled
-    }
-
+    // === CAPTURE — REWRITTEN with safe RAW support ===
     func capturePhoto(completion: @escaping (Result<[String: String], Error>) -> Void) {
         sessionQueue.async {
             self.pendingRawURL = nil
@@ -213,37 +199,70 @@ class CameraManager: NSObject {
             self.captureError = nil
             self.lastPhotoCompletion = completion
 
-            let settings: AVCapturePhotoSettings
+            var settings: AVCapturePhotoSettings
 
-            if self.isRawEnabled,
-               let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first {
-                let processedFormat: [String: Any] = [
-                    AVVideoCodecKey: AVVideoCodecType.jpeg
-                ]
-                settings = AVCapturePhotoSettings(
-                    rawPixelFormatType: rawFormat,
-                    processedFormat: processedFormat
-                )
-                self.expectedPhotoCount = 2
-                print("📸 RAW+JPEG capture")
+            // Attempt RAW+JPEG kung enabled AT supported
+            if self.isRawEnabled {
+                let rawFormats = self.photoOutput.availableRawPhotoPixelFormatTypes
+                if let rawFormat = rawFormats.first {
+                    // RAW + processed JPEG combo
+                    do {
+                        settings = AVCapturePhotoSettings(
+                            rawPixelFormatType: rawFormat,
+                            processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg]
+                        )
+                        self.expectedPhotoCount = 2
+
+                        // IMPORTANTE: RAW captures ay hindi supported ang .balanced/.quality prioritization
+                        // Dapat .speed lang para hindi mag-crash
+                        if #available(iOS 13.0, *) {
+                            settings.photoQualityPrioritization = .speed
+                        }
+
+                        // RAW ay hindi rin supports high-res photo enabled kasama ng RAW format
+                        settings.isHighResolutionPhotoEnabled = false
+
+                        // RAW hindi supports image stabilization
+                        settings.isAutoStillImageStabilizationEnabled = false
+
+                        print("📸 RAW+JPEG capture: format=\(rawFormat)")
+                    } catch {
+                        // Fallback to JPEG-only kung mag-error
+                        print("⚠️ RAW settings init failed, falling back to JPEG: \(error)")
+                        settings = AVCapturePhotoSettings()
+                        self.expectedPhotoCount = 1
+                        settings.isHighResolutionPhotoEnabled = true
+                        if #available(iOS 13.0, *) {
+                            settings.photoQualityPrioritization = .balanced
+                        }
+                    }
+                } else {
+                    // No RAW available — fallback JPEG
+                    print("⚠️ RAW requested but no RAW format available, JPEG only")
+                    settings = AVCapturePhotoSettings()
+                    self.expectedPhotoCount = 1
+                    settings.isHighResolutionPhotoEnabled = true
+                    if #available(iOS 13.0, *) {
+                        settings.photoQualityPrioritization = .balanced
+                    }
+                }
             } else {
+                // Normal JPEG-only path
                 settings = AVCapturePhotoSettings()
                 self.expectedPhotoCount = 1
+                settings.isHighResolutionPhotoEnabled = true
+                if #available(iOS 13.0, *) {
+                    settings.photoQualityPrioritization = .balanced
+                }
+                settings.isAutoStillImageStabilizationEnabled = self.isHDREnabled
                 print("📸 JPEG-only capture")
             }
-
-            settings.isHighResolutionPhotoEnabled = true
-
-            if #available(iOS 13.0, *) {
-                settings.photoQualityPrioritization = .balanced
-            }
-
-            settings.isAutoStillImageStabilizationEnabled = self.isRawEnabled || self.isHDREnabled
 
             if let d = self.device, d.hasFlash {
                 settings.flashMode = self.flashMode
             }
 
+            // Wrap capture call sa try/catch via Objective-C exception handler
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
@@ -254,16 +273,17 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
         if let error = error {
+            print("❌ photoOutput error: \(error)")
             captureError = error
             checkAndComplete()
             return
         }
 
         let isRawPhoto = photo.isRawPhoto
-        let data = photo.fileDataRepresentation()
         let ext = isRawPhoto ? "dng" : "jpg"
 
-        guard let photoData = data else {
+        guard let photoData = photo.fileDataRepresentation() else {
+            print("❌ No photo data (isRaw: \(isRawPhoto))")
             captureError = NSError(domain: "Camera", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "No photo data"])
             checkAndComplete()
@@ -272,19 +292,22 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
         let tmpDir = NSTemporaryDirectory()
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        let filename = "manualcam_\(timestamp).\(ext)"
+        // Use different filename for RAW vs JPEG para hindi mag-overwrite
+        let suffix = isRawPhoto ? "_raw" : ""
+        let filename = "manualcam_\(timestamp)\(suffix).\(ext)"
         let filePath = (tmpDir as NSString).appendingPathComponent(filename)
 
         do {
             try photoData.write(to: URL(fileURLWithPath: filePath))
             if isRawPhoto {
                 pendingRawURL = filePath
-                print("✅ RAW (DNG) saved: \(filePath)")
+                print("✅ RAW (DNG) saved: \(filePath) [\(photoData.count) bytes]")
             } else {
                 pendingJpegURL = filePath
-                print("✅ JPEG saved: \(filePath)")
+                print("✅ JPEG saved: \(filePath) [\(photoData.count) bytes]")
             }
         } catch {
+            print("❌ Write error: \(error)")
             captureError = error
         }
 
@@ -293,6 +316,7 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
     private func checkAndComplete() {
         receivedPhotoCount += 1
+        print("📸 Received: \(receivedPhotoCount)/\(expectedPhotoCount)")
 
         if receivedPhotoCount >= expectedPhotoCount || captureError != nil {
             DispatchQueue.main.async {
