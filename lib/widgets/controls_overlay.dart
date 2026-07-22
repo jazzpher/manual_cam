@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 class ControlsOverlay extends StatelessWidget {
@@ -6,6 +7,7 @@ class ControlsOverlay extends StatelessWidget {
   final List<double> shutterSpeedValues;
   final List<String> aspectRatios;
   final bool isHDREnabled, isRawEnabled, isCineEnabled, isCapturing;
+  final int uiOrientation; // 0=portrait, 1=landscapeRight, 2=upsideDown, 3=landscapeLeft
   final bool showISOSlider, showEVSlider, showShutterPicker, showFocusSlider, showZoomSlider;
   final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
@@ -31,6 +33,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.isRawEnabled,
     required this.isCineEnabled,
     required this.isCapturing,
+    required this.uiOrientation,
     required this.onISOChanged,
     required this.onShutterSpeedChanged,
     required this.onExposureBiasChanged,
@@ -57,6 +60,30 @@ class ControlsOverlay extends StatelessWidget {
 
   bool get _anyPopupOpen =>
       showISOSlider || showEVSlider || showShutterPicker || showFocusSlider || showZoomSlider;
+
+  /// Convert orientation code to rotation angle (radians).
+  /// Portrait UI = 0°, so:
+  /// - Landscape right (phone rotated CW) → icons rotate +90° (CCW visually)
+  /// - Upside down → 180°
+  /// - Landscape left → -90°
+  double get _rotationAngle {
+    switch (uiOrientation) {
+      case 1: return -math.pi / 2;   // landscape right → rotate icons CCW
+      case 2: return math.pi;         // upside down
+      case 3: return math.pi / 2;    // landscape left → rotate icons CW
+      default: return 0;              // portrait
+    }
+  }
+
+  /// Wrap any widget sa smooth rotation animation
+  Widget _rotate(Widget child) {
+    return AnimatedRotation(
+      turns: _rotationAngle / (2 * math.pi),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      child: child,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +130,7 @@ class ControlsOverlay extends StatelessWidget {
               final next = flashMode == 'off' ? 'on' : flashMode == 'on' ? 'auto' : 'off';
               onFlashModeChanged(next);
             },
-            child: _pill(
+            child: _rotate(_pill(
               icon: flashMode == 'off'
                   ? Icons.flash_off
                   : flashMode == 'on'
@@ -111,36 +138,35 @@ class ControlsOverlay extends StatelessWidget {
                       : Icons.flash_auto,
               label: flashMode.toUpperCase(),
               color: flashMode == 'off' ? Colors.grey : Colors.amber,
-            ),
+            )),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleHDR,
-            child: _pill(
+            child: _rotate(_pill(
               label: 'HDR',
               color: isHDREnabled ? Colors.amber : Colors.grey,
-            ),
+            )),
           ),
           const SizedBox(width: 6),
-          // === BAGONG CINE PILL (kulay orange kapag ON) ===
           GestureDetector(
             onTap: onToggleCine,
-            child: _pill(
+            child: _rotate(_pill(
               icon: Icons.movie_filter,
               label: 'CINE',
               color: isCineEnabled ? Colors.deepOrangeAccent : Colors.grey,
-            ),
+            )),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleRAW,
-            child: _pill(
+            child: _rotate(_pill(
               label: 'RAW',
               color: isRawEnabled ? Colors.amber : Colors.grey,
-            ),
+            )),
           ),
           const Spacer(),
-          _pill(label: 'MANUAL', color: Colors.amber),
+          _rotate(_pill(label: 'MANUAL', color: Colors.amber)),
         ],
       ),
     );
@@ -195,7 +221,7 @@ class ControlsOverlay extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 2),
                 child: GestureDetector(
                   onTap: () => onAspectRatioChanged(ratio),
-                  child: Container(
+                  child: _rotate(Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: isSelected ? Colors.amber.withOpacity(0.3) : Colors.black38,
@@ -208,7 +234,7 @@ class ControlsOverlay extends StatelessWidget {
                           fontSize: 11,
                           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                         )),
-                  ),
+                  )),
                 ),
               );
             }).toList(),
@@ -224,7 +250,7 @@ class ControlsOverlay extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: Column(
+        child: _rotate(Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(value,
@@ -237,7 +263,7 @@ class ControlsOverlay extends StatelessWidget {
             const SizedBox(height: 2),
             Text(label, style: const TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.w500)),
           ],
-        ),
+        )),
       ),
     );
   }

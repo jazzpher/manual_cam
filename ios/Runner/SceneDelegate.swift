@@ -71,6 +71,8 @@ class SceneDelegate: FlutterSceneDelegate {
                 let mode = (call.arguments as? [String: Any])?["mode"] as? String ?? "off"
                 mgr.setFlashMode(mode)
                 result(true)
+            case "getOrientation":
+                result(mgr.currentOrientationCode())
             case "setHDR":
                 let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
                 mgr.setHDR(enabled)

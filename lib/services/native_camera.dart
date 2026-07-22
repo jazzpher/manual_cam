@@ -91,6 +91,17 @@ class NativeCamera {
     catch (e) { print('setRAW error: $e'); }
   }
 
+  /// Get physical device orientation from native (via CoreMotion).
+  /// Returns: 0=portrait, 1=landscapeRight, 2=upsideDown, 3=landscapeLeft
+  Future<int> getCurrentOrientationCode() async {
+    try {
+      final result = await _channel.invokeMethod('getOrientation');
+      return (result as int?) ?? 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
   /// Regular capture. Auto-applies cinematic grade sa JPEG kapag `cinematicMode` ON.
   Future<Map<String, String>> capturePhoto() async {
     try {

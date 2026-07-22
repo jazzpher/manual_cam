@@ -2,6 +2,7 @@ import AVFoundation
 import UIKit
 import Flutter
 import Photos
+import CoreMotion
 
 class CameraManager: NSObject {
     static let shared = CameraManager()
@@ -23,6 +24,13 @@ class CameraManager: NSObject {
     private var captureError: Error?
 
     private var softwareZoomFactor: CGFloat = 1.0
+
+    // === ORIENTATION TRACKING (via CoreMotion — mas reliable kaysa UIDevice) ===
+    // Kailangan CoreMotion kasi kapag portrait-locked ang UI, hindi na-fifire yung
+    // UIDevice orientation changes. CoreMotion nagbibigay ng raw accelerometer data
+    // para malaman natin yung physical orientation ng phone kahit portrait-locked yung UI.
+    private let motionManager = CMMotionManager()
+    private var currentPhysicalOrientation: UIDeviceOrientation = .portrait
 
     func setup(completion: @escaping (Result<[String: Any], Error>) -> Void) {
         sessionQueue.async {
@@ -56,11 +64,77 @@ class CameraManager: NSObject {
                 self.session.commitConfiguration()
                 self.session.startRunning()
 
+                // === Start orientation tracking ===
+                self.startOrientationTracking()
+
                 let caps = self.getCapabilities()
                 DispatchQueue.main.async { completion(.success(caps)) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
             }
+        }
+    }
+
+    // === ORIENTATION TRACKING via CoreMotion ===
+    private func startOrientationTracking() {
+        guard motionManager.isAccelerometerAvailable else {
+            print("⚠️ Accelerometer not available")
+            return
+        }
+
+        motionManager.accelerometerUpdateInterval = 0.2 // 5x per second, enough for orientation
+
+        motionManager.startAccelerometerUpdates(to: OperationQueue()) { [weak self] data, error in
+            guard let self = self, let data = data else { return }
+
+            let x = data.acceleration.x
+            let y = data.acceleration.y
+
+            // Determine physical orientation base sa gravity vector
+            var newOrientation: UIDeviceOrientation = self.currentPhysicalOrientation
+
+            if abs(y) > abs(x) {
+                // Portrait or upside down
+                newOrientation = y < 0 ? .portrait : .portraitUpsideDown
+            } else {
+                // Landscape
+                newOrientation = x > 0 ? .landscapeRight : .landscapeLeft
+            }
+
+            if newOrientation != self.currentPhysicalOrientation {
+                self.currentPhysicalOrientation = newOrientation
+                // Notify Flutter side kung may listener
+                DispatchQueue.main.async {
+                    self.orientationCallback?(newOrientation)
+                }
+            }
+        }
+    }
+
+    // Callback para sabihin sa Flutter yung current physical orientation
+    var orientationCallback: ((UIDeviceOrientation) -> Void)?
+
+    /// Get orientation code para sa Flutter (0=portrait, 1=landscapeRight, 2=upsideDown, 3=landscapeLeft)
+    func currentOrientationCode() -> Int {
+        switch currentPhysicalOrientation {
+        case .portrait: return 0
+        case .landscapeRight: return 1
+        case .portraitUpsideDown: return 2
+        case .landscapeLeft: return 3
+        default: return 0
+        }
+    }
+
+    /// Convert UIDeviceOrientation → AVCaptureVideoOrientation
+    /// (para tama yung orientation ng captured photo)
+    private func videoOrientation(for deviceOrientation: UIDeviceOrientation) -> AVCaptureVideoOrientation {
+        switch deviceOrientation {
+        case .portrait: return .portrait
+        case .portraitUpsideDown: return .portraitUpsideDown
+        // Note: UIDevice.landscapeLeft = AVCapture.landscapeRight (naka-flip yung mapping)
+        case .landscapeLeft: return .landscapeRight
+        case .landscapeRight: return .landscapeLeft
+        default: return .portrait
         }
     }
 
@@ -220,7 +294,7 @@ class CameraManager: NSObject {
     var currentSoftwareZoom: CGFloat { softwareZoomFactor }
     var isInRawMode: Bool { isRawEnabled }
 
-    // === CAPTURE ===
+    // === CAPTURE with orientation-aware output ===
     func capturePhoto(completion: @escaping (Result<[String: String], Error>) -> Void) {
         sessionQueue.async {
             self.pendingRawURL = nil
@@ -228,6 +302,17 @@ class CameraManager: NSObject {
             self.receivedPhotoCount = 0
             self.captureError = nil
             self.lastPhotoCompletion = completion
+
+            // === SET VIDEO ORIENTATION BASE SA PHYSICAL DEVICE POSITION ===
+            // Ito ang secret sauce: kunin natin yung current physical orientation
+            // (from CoreMotion) at i-apply sa AVCapture connection para tama
+            // ang orientation ng saved photo file.
+            let orientation = self.videoOrientation(for: self.currentPhysicalOrientation)
+            if let photoConnection = self.photoOutput.connection(with: .video) {
+                if photoConnection.isVideoOrientationSupported {
+                    photoConnection.videoOrientation = orientation
+                }
+            }
 
             var settings: AVCapturePhotoSettings
 
@@ -259,6 +344,11 @@ class CameraManager: NSObject {
 
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
+    }
+
+    // Cleanup on dealloc
+    deinit {
+        motionManager.stopAccelerometerUpdates()
     }
 }
 
