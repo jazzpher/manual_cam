@@ -22,9 +22,13 @@ class CameraManager: NSObject {
     private var receivedPhotoCount: Int = 0
     private var captureError: Error?
 
-    // Halide-style: kapag naka-RAW mode, hardware zoom naka-lock sa 1.0x
-    // Yung "software zoom" ay stored dito at ginagamit para sa post-capture crop
     private var softwareZoomFactor: CGFloat = 1.0
+
+    // === BRACKET STATE ===
+    private var bracketPhotos: [String] = []
+    private var bracketExpected: Int = 0
+    private var bracketError: Error?
+    private var lastBracketCompletion: ((Result<[String], Error>) -> Void)?
 
     func setup(completion: @escaping (Result<[String: Any], Error>) -> Void) {
         sessionQueue.async {
@@ -168,9 +172,6 @@ class CameraManager: NSObject {
         }
     }
 
-    // === HALIDE-STYLE ZOOM ===
-    // Kapag RAW ay OFF → hardware zoom (fast, gaya ng dati)
-    // Kapag RAW ay ON → hardware naka-lock sa 1.0x, save the target sa softwareZoomFactor
     func setZoom(_ factor: CGFloat, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
         sessionQueue.async {
@@ -178,26 +179,20 @@ class CameraManager: NSObject {
             self.softwareZoomFactor = clamped
 
             if self.isRawEnabled {
-                // RAW mode: hardware naka-1.0x lang, walang change sa device
-                // Yung UI preview mag-handle ng zoom via crop
-                print("📸 RAW mode zoom: software factor = \(clamped)x (hardware locked at 1.0x)")
+                print("📸 RAW mode zoom: software factor = \(clamped)x")
                 completion(true)
                 return
             }
 
-            // JPEG mode: normal hardware zoom
             do {
                 try d.lockForConfiguration()
                 d.videoZoomFactor = clamped
                 d.unlockForConfiguration()
-                print("📸 JPEG mode zoom: hardware = \(clamped)x")
                 completion(true)
             } catch { completion(false) }
         }
     }
 
-    // Kailangan i-handle rin ang RAW toggle — kapag mag-shift ka mula JPEG (zoomed) papuntang RAW,
-    // dapat i-reset ang hardware zoom sa 1.0x
     func setRAW(_ enabled: Bool) {
         isRawEnabled = enabled
         guard let d = device else { return }
@@ -206,15 +201,11 @@ class CameraManager: NSObject {
             do {
                 try d.lockForConfiguration()
                 if enabled {
-                    // Save current hardware zoom as software zoom, tapos reset hardware to 1.0x
                     self.softwareZoomFactor = d.videoZoomFactor
                     d.videoZoomFactor = 1.0
-                    print("📸 RAW toggled ON: hardware zoom reset to 1.0x, software zoom = \(self.softwareZoomFactor)x")
                 } else {
-                    // Restore hardware zoom to what software zoom was
                     let target = max(1.0, min(self.softwareZoomFactor, d.activeFormat.videoMaxZoomFactor))
                     d.videoZoomFactor = target
-                    print("📸 RAW toggled OFF: hardware zoom restored to \(target)x")
                 }
                 d.unlockForConfiguration()
             } catch {
@@ -233,14 +224,10 @@ class CameraManager: NSObject {
 
     func setHDR(_ enabled: Bool) { isHDREnabled = enabled }
 
-    // Expose software zoom for UI to read
     var currentSoftwareZoom: CGFloat { softwareZoomFactor }
     var isInRawMode: Bool { isRawEnabled }
 
-    // === CAPTURE ===
-    // JPEG-only mode: hardware zoom applied, normal capture
-    // RAW mode: hardware sa 1.0x, kunin full RAW+JPEG, tapos software-crop both files
-    //   after capture para tumugma sa softwareZoomFactor
+    // === REGULAR CAPTURE ===
     func capturePhoto(completion: @escaping (Result<[String: String], Error>) -> Void) {
         sessionQueue.async {
             self.pendingRawURL = nil
@@ -253,20 +240,16 @@ class CameraManager: NSObject {
 
             if self.isRawEnabled,
                let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first {
-                // RAW+JPEG at 1.0x hardware (Halide-style)
                 settings = AVCapturePhotoSettings(
                     rawPixelFormatType: rawFormat,
                     processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg]
                 )
                 self.expectedPhotoCount = 2
-
                 if #available(iOS 13.0, *) {
                     settings.photoQualityPrioritization = .speed
                 }
                 settings.isHighResolutionPhotoEnabled = false
                 settings.isAutoStillImageStabilizationEnabled = false
-
-                print("📸 RAW+JPEG capture (soft zoom: \(self.softwareZoomFactor)x)")
             } else {
                 settings = AVCapturePhotoSettings()
                 self.expectedPhotoCount = 1
@@ -275,7 +258,6 @@ class CameraManager: NSObject {
                     settings.photoQualityPrioritization = .balanced
                 }
                 settings.isAutoStillImageStabilizationEnabled = self.isHDREnabled
-                print("📸 JPEG capture (hardware zoom: \(self.device?.videoZoomFactor ?? 1.0)x)")
             }
 
             if let d = self.device, d.hasFlash {
@@ -285,6 +267,151 @@ class CameraManager: NSObject {
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
+
+    // === BRACKET CAPTURE (for HDR+ mode) ===
+    // Capture 3 JPEG photos sequentially with -2 EV, 0 EV, +2 EV
+    func captureBracket(completion: @escaping (Result<[String], Error>) -> Void) {
+        sessionQueue.async {
+            self.bracketPhotos = []
+            self.bracketExpected = 3
+            self.bracketError = nil
+            self.lastBracketCompletion = completion
+
+            guard let d = self.device else {
+                DispatchQueue.main.async {
+                    completion(.failure(NSError(domain: "Camera", code: 1, userInfo: [NSLocalizedDescriptionKey: "No device"])))
+                }
+                return
+            }
+
+            // Save original exposure state para ma-restore later
+            let originalMode = d.exposureMode
+            let originalBias = d.exposureTargetBias
+
+            let biases: [Float] = [-2.0, 0.0, 2.0]
+
+            self.captureBracketSequentially(device: d, biases: biases, index: 0) {
+                // Restore original exposure state
+                do {
+                    try d.lockForConfiguration()
+                    d.exposureMode = originalMode
+                    if originalMode == .continuousAutoExposure || originalMode == .autoExpose {
+                        d.setExposureTargetBias(originalBias, completionHandler: nil)
+                    }
+                    d.unlockForConfiguration()
+                } catch {
+                    print("⚠️ Failed to restore exposure: \(error)")
+                }
+
+                DispatchQueue.main.async {
+                    if let err = self.bracketError {
+                        completion(.failure(err))
+                    } else {
+                        completion(.success(self.bracketPhotos))
+                    }
+                    self.lastBracketCompletion = nil
+                }
+            }
+        }
+    }
+
+    private func captureBracketSequentially(device: AVCaptureDevice, biases: [Float], index: Int, allDone: @escaping () -> Void) {
+        if index >= biases.count {
+            allDone()
+            return
+        }
+
+        let targetBias = biases[index]
+        print("📸 Bracket \(index + 1)/\(biases.count): EV \(targetBias)")
+
+        // Set exposure bias
+        do {
+            try device.lockForConfiguration()
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            let clamped = max(device.minExposureTargetBias, min(targetBias, device.maxExposureTargetBias))
+            device.setExposureTargetBias(clamped) { [weak self] _ in
+                // Wait a bit para stable ang exposure
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    self?.performSingleBracketShot(device: device, biases: biases, index: index, allDone: allDone)
+                }
+            }
+            device.unlockForConfiguration()
+        } catch {
+            bracketError = error
+            allDone()
+        }
+    }
+
+    private func performSingleBracketShot(device: AVCaptureDevice, biases: [Float], index: Int, allDone: @escaping () -> Void) {
+        // Create simple JPEG settings
+        let settings = AVCapturePhotoSettings()
+        settings.isHighResolutionPhotoEnabled = true
+        if #available(iOS 13.0, *) {
+            settings.photoQualityPrioritization = .balanced
+        }
+        settings.isAutoStillImageStabilizationEnabled = false
+
+        if device.hasFlash {
+            settings.flashMode = .off // Bracket = no flash
+        }
+
+        // Use a temporary delegate para dedicated sa bracket
+        let bracketDelegate = BracketPhotoDelegate { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let path):
+                self.bracketPhotos.append(path)
+                print("✅ Bracket \(index + 1) saved: \(path)")
+                self.captureBracketSequentially(device: device, biases: biases, index: index + 1, allDone: allDone)
+            case .failure(let error):
+                print("❌ Bracket \(index + 1) failed: \(error)")
+                self.bracketError = error
+                allDone()
+            }
+        }
+
+        // Retain delegate para hindi ma-dealloc habang capture
+        self.currentBracketDelegate = bracketDelegate
+        self.photoOutput.capturePhoto(with: settings, delegate: bracketDelegate)
+    }
+
+    private var currentBracketDelegate: BracketPhotoDelegate?
+}
+
+// Dedicated delegate for bracket shots
+class BracketPhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate {
+    let callback: (Result<String, Error>) -> Void
+
+    init(callback: @escaping (Result<String, Error>) -> Void) {
+        self.callback = callback
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput,
+                     didFinishProcessingPhoto photo: AVCapturePhoto,
+                     error: Error?) {
+        if let error = error {
+            callback(.failure(error))
+            return
+        }
+        guard let data = photo.fileDataRepresentation() else {
+            callback(.failure(NSError(domain: "Camera", code: 2, userInfo: [NSLocalizedDescriptionKey: "No data"])))
+            return
+        }
+
+        let tmpDir = NSTemporaryDirectory()
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let filename = "bracket_\(timestamp).jpg"
+        let filePath = (tmpDir as NSString).appendingPathComponent(filename)
+
+        do {
+            try data.write(to: URL(fileURLWithPath: filePath))
+            callback(.success(filePath))
+        } catch {
+            callback(.failure(error))
+        }
+    }
 }
 
 extension CameraManager: AVCapturePhotoCaptureDelegate {
@@ -292,7 +419,6 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
         if let error = error {
-            print("❌ photoOutput error: \(error)")
             captureError = error
             checkAndComplete()
             return
@@ -318,10 +444,8 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             try photoData.write(to: URL(fileURLWithPath: filePath))
             if isRawPhoto {
                 pendingRawURL = filePath
-                print("✅ RAW saved: \(filePath) [\(photoData.count) bytes]")
             } else {
                 pendingJpegURL = filePath
-                print("✅ JPEG saved: \(filePath) [\(photoData.count) bytes]")
             }
         } catch {
             captureError = error
@@ -341,7 +465,6 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                     var paths: [String: String] = [:]
                     if let jpeg = self.pendingJpegURL { paths["jpeg"] = jpeg }
                     if let raw = self.pendingRawURL { paths["raw"] = raw }
-                    // Pass yung software zoom factor sa Dart side para siya na ang mag-crop
                     paths["_softwareZoom"] = String(format: "%.2f", self.softwareZoomFactor)
                     self.lastPhotoCompletion?(.success(paths))
                 }

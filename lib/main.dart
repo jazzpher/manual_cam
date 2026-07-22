@@ -50,6 +50,7 @@ class _CameraScreenState extends State<CameraScreen> {
   double _focus = 0.5;
   bool _isHDREnabled = false;
   bool _isRawEnabled = false;
+  bool _isHDRPlusEnabled = false; // BAGO: HDR+ mode (auto-blend)
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
@@ -152,15 +153,33 @@ class _CameraScreenState extends State<CameraScreen> {
       }
       return;
     }
-    setState(() => _isRawEnabled = !_isRawEnabled);
+    // Kapag mag-on ng RAW at naka-HDR+, disable HDR+ (incompatible)
+    setState(() {
+      _isRawEnabled = !_isRawEnabled;
+      if (_isRawEnabled) _isHDRPlusEnabled = false;
+    });
     await _camera.setRAW(_isRawEnabled);
+  }
+
+  // === BAGONG TOGGLE FOR HDR+ ===
+  Future<void> _toggleHDRPlus() async {
+    // Kapag mag-on ng HDR+ at naka-RAW, disable RAW (incompatible)
+    setState(() {
+      _isHDRPlusEnabled = !_isHDRPlusEnabled;
+      if (_isHDRPlusEnabled) {
+        _isRawEnabled = false;
+      }
+    });
+    if (!_isRawEnabled) {
+      await _camera.setRAW(false);
+    }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_isRawEnabled
-              ? '📸 RAW mode ON — DNG + JPEG will be saved. Zoom is software-based.'
-              : '📸 RAW mode OFF — JPEG only, hardware zoom enabled.'),
+          content: Text(_isHDRPlusEnabled
+              ? '📸 HDR+ ON — 3-shot exposure blend for balanced dynamic range'
+              : '📸 HDR+ OFF — normal capture'),
           backgroundColor: Colors.blueGrey.shade700,
           duration: const Duration(seconds: 3),
         ),
@@ -182,31 +201,60 @@ class _CameraScreenState extends State<CameraScreen> {
     if (_isCapturing) return;
     setState(() => _isCapturing = true);
 
+    // Show progress message for HDR+ (kasi mas matagal)
+    if (_isHDRPlusEnabled && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⏳ Capturing 3 exposures & blending...'),
+          backgroundColor: Colors.blueGrey,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+
     try {
-      final paths = await _camera.capturePhoto();
-      if (mounted) {
-        final hasRaw = paths.containsKey('raw');
-        final zoom = paths['zoom'] ?? '1.0';
-        final zoomLabel = zoom == '1.0' ? '' : ' (${zoom}x)';
+      if (_isHDRPlusEnabled) {
+        // === HDR+ CAPTURE ===
+        final path = await _camera.captureHDRBlend();
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('📸 HDR+ blended photo saved to Photos!'),
+              backgroundColor: Colors.green.shade700,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        // === REGULAR CAPTURE (JPEG or RAW+JPEG) ===
+        final paths = await _camera.capturePhoto();
+        if (mounted) {
+          final hasRaw = paths.containsKey('raw');
+          final zoom = paths['zoom'] ?? '1.0';
+          final zoomLabel = zoom == '1.0' ? '' : ' (${zoom}x)';
 
-        final message = hasRaw
-            ? '📸 RAW + JPEG saved$zoomLabel'
-            : '📸 JPEG saved$zoomLabel';
+          final message = hasRaw
+              ? '📸 RAW + JPEG saved$zoomLabel'
+              : '📸 JPEG saved$zoomLabel';
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.green.shade700,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message),
+              backgroundColor: Colors.green.shade700,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Capture error: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -223,6 +271,12 @@ class _CameraScreenState extends State<CameraScreen> {
       _showFocusSlider = false;
       _showZoomSlider = false;
     });
+  }
+
+  String _modeLabel() {
+    if (_isHDRPlusEnabled) return 'HDR+';
+    if (_isRawEnabled) return 'RAW+JPEG';
+    return 'JPEG';
   }
 
   @override
@@ -301,6 +355,7 @@ class _CameraScreenState extends State<CameraScreen> {
             flashMode: _flashMode,
             isHDREnabled: _isHDREnabled,
             isRawEnabled: _isRawEnabled,
+            isHDRPlusEnabled: _isHDRPlusEnabled,
             isCapturing: _isCapturing,
             onISOChanged: _setISO,
             onShutterSpeedChanged: _setShutter,
@@ -312,6 +367,7 @@ class _CameraScreenState extends State<CameraScreen> {
             onCapture: _capturePhoto,
             onToggleHDR: _toggleHDR,
             onToggleRAW: _toggleRAW,
+            onToggleHDRPlus: _toggleHDRPlus,
             onCloseAllPopups: _closeAllPopups,
             showISOSlider: _showISOSlider,
             onToggleISOSlider: () {
@@ -355,9 +411,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                _isRawEnabled
-                    ? '$_aspectRatio · RAW+JPEG · ${_zoom.toStringAsFixed(1)}x SW'
-                    : '$_aspectRatio · JPEG · ${_zoom.toStringAsFixed(1)}x HW',
+                '$_aspectRatio · ${_modeLabel()} · ${_zoom.toStringAsFixed(1)}x',
                 style: const TextStyle(
                   color: Colors.amber,
                   fontSize: 10,

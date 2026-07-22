@@ -5,11 +5,11 @@ class ControlsOverlay extends StatelessWidget {
   final String shutterSpeed, aspectRatio, flashMode;
   final List<double> shutterSpeedValues;
   final List<String> aspectRatios;
-  final bool isHDREnabled, isRawEnabled, isCapturing;
+  final bool isHDREnabled, isRawEnabled, isHDRPlusEnabled, isCapturing;
   final bool showISOSlider, showEVSlider, showShutterPicker, showFocusSlider, showZoomSlider;
   final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
-  final VoidCallback onCapture, onToggleHDR, onToggleRAW;
+  final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleHDRPlus;
   final VoidCallback onToggleISOSlider, onToggleEVSlider, onToggleShutterPicker, onToggleFocusSlider, onToggleZoomSlider;
   final VoidCallback onCloseAllPopups;
 
@@ -29,6 +29,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.flashMode,
     required this.isHDREnabled,
     required this.isRawEnabled,
+    required this.isHDRPlusEnabled,
     required this.isCapturing,
     required this.onISOChanged,
     required this.onShutterSpeedChanged,
@@ -40,6 +41,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onCapture,
     required this.onToggleHDR,
     required this.onToggleRAW,
+    required this.onToggleHDRPlus,
     required this.showISOSlider,
     required this.onToggleISOSlider,
     required this.showEVSlider,
@@ -93,7 +95,7 @@ class ControlsOverlay extends StatelessWidget {
 
   Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
           GestureDetector(
@@ -111,7 +113,7 @@ class ControlsOverlay extends StatelessWidget {
               color: flashMode == 'off' ? Colors.grey : Colors.amber,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleHDR,
             child: _pill(
@@ -119,7 +121,16 @@ class ControlsOverlay extends StatelessWidget {
               color: isHDREnabled ? Colors.amber : Colors.grey,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
+          // === BAGONG HDR+ PILL ===
+          GestureDetector(
+            onTap: onToggleHDRPlus,
+            child: _pill(
+              label: 'HDR+',
+              color: isHDRPlusEnabled ? Colors.cyanAccent : Colors.grey,
+            ),
+          ),
+          const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleRAW,
             child: _pill(
@@ -136,7 +147,7 @@ class ControlsOverlay extends StatelessWidget {
 
   Widget _pill({IconData? icon, required String label, required Color color}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.black54,
         borderRadius: BorderRadius.circular(16),
@@ -146,10 +157,10 @@ class ControlsOverlay extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, color: color, size: 14),
-            const SizedBox(width: 4),
+            Icon(icon, color: color, size: 12),
+            const SizedBox(width: 3),
           ],
-          Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+          Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -252,7 +263,10 @@ class ControlsOverlay extends StatelessWidget {
               height: 75,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 4),
+                border: Border.all(
+                  color: isHDRPlusEnabled ? Colors.cyanAccent : Colors.white,
+                  width: 4,
+                ),
                 color: isCapturing ? Colors.white38 : Colors.white,
               ),
               child: Center(
@@ -261,7 +275,13 @@ class ControlsOverlay extends StatelessWidget {
                         width: 24,
                         height: 24,
                         child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Container(width: 63, height: 63, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white)),
+                    : Container(
+                        width: 63,
+                        height: 63,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isHDRPlusEnabled ? Colors.cyanAccent : Colors.white,
+                        )),
               ),
             ),
           ),

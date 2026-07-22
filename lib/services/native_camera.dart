@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:gal/gal.dart';
@@ -113,11 +114,7 @@ class NativeCamera {
     }
   }
 
-  /// Capture at save sa Photos app.
-  /// Kapag naka-RAW mode + zoomed, i-software crop natin yung JPEG (RAW/DNG ay
-  /// hindi na natin ino-crop kasi editable pa rin sya sa Lightroom via crop tool).
-  ///
-  /// Returns: {'jpeg': path, 'raw': path (optional), 'zoom': '1.5' (as string)}
+  /// Regular capture (JPEG or RAW+JPEG).
   Future<Map<String, String>> capturePhoto() async {
     try {
       final result = await _channel.invokeMethod('capturePhoto');
@@ -140,32 +137,17 @@ class NativeCamera {
 
       if (paths.isEmpty) throw Exception('No files created');
 
-      // Halide-style: if RAW mode + zoom > 1.0x, apply software crop sa JPEG
-      // para tumugma yung final image sa zoom level ng preview
       if (softwareZoom > 1.01 && paths['raw'] != null && paths['jpeg'] != null) {
-        print('📸 Applying software zoom crop: ${softwareZoom}x');
-
-        // Crop the JPEG to match zoom
         try {
           final croppedJpegPath = await _softwareZoomCrop(paths['jpeg']!, softwareZoom);
           if (croppedJpegPath != null) {
             paths['jpeg'] = croppedJpegPath;
-            print('✅ JPEG software-zoomed to ${softwareZoom}x');
           }
         } catch (e) {
-          print('⚠️ JPEG crop failed: $e (keeping original)');
+          print('⚠️ JPEG crop failed: $e');
         }
-
-        // Crop the RAW/DNG din para consistent
-        // NOTE: pure Dart image package HINDI kayang mag-decode ng DNG.
-        // Kaya isu-skip natin. Sa Lightroom, ma-a-adjust naman ng user manually.
-        // OR: puwedeng i-save with metadata na crop hint, pero yun ay complex.
-        // Ang solusyon: leave DNG untouched (full sensor), i-crop lang JPEG.
-        // Yung user pag nag-Lightroom, makikita nila yung full sensor DNG
-        // at manual nila ma-c-crop.
       }
 
-      // Save each file to Photos app
       try {
         final hasAccess = await Gal.hasAccess(toAlbum: true);
         if (!hasAccess) {
@@ -174,18 +156,14 @@ class NativeCamera {
 
         if (paths['jpeg'] != null) {
           await Gal.putImage(paths['jpeg']!, album: 'ManualCam');
-          print('✅ JPEG saved to Photos: ${paths['jpeg']}');
         }
-
         if (paths['raw'] != null) {
           await Gal.putImage(paths['raw']!, album: 'ManualCam');
-          print('✅ RAW/DNG saved to Photos: ${paths['raw']}');
         }
       } catch (e) {
         print('❌ Photos save error: $e');
       }
 
-      // Add zoom as metadata for UI feedback
       paths['zoom'] = softwareZoom.toStringAsFixed(1);
       return paths;
     } on PlatformException catch (e) {
@@ -193,21 +171,187 @@ class NativeCamera {
     }
   }
 
-  /// Center-crop a JPEG file to simulate optical zoom.
-  /// Returns path to the new cropped file (original is preserved).
+  /// === HDR+ MODE ===
+  /// Capture 3 bracketed exposures (-2, 0, +2 EV) tapos blend them into a single
+  /// tone-mapped JPEG. Ganito ang idea:
+  /// - Highlights (bright areas) → gamitin yung UNDEREXPOSED (-2 EV) photo
+  /// - Shadows (dark areas) → gamitin yung OVEREXPOSED (+2 EV) photo
+  /// - Midtones → gamitin yung NORMAL (0 EV) photo
+  ///
+  /// Weighted blend based sa luminance ng normal exposure.
+  Future<String> captureHDRBlend() async {
+    try {
+      // Kunin ang 3 bracket photos mula sa native side
+      final result = await _channel.invokeMethod('captureBracket');
+      if (result == null || result is! List) {
+        throw Exception('Bracket capture returned null');
+      }
+
+      final photoPaths = result.map((p) => p.toString()).toList();
+      if (photoPaths.length != 3) {
+        throw Exception('Expected 3 bracket photos, got ${photoPaths.length}');
+      }
+
+      print('📸 Blending 3 bracket photos into HDR...');
+
+      // Blend the 3 photos
+      final blendedPath = await _blendBracketPhotos(
+        underexposedPath: photoPaths[0], // -2 EV
+        normalPath: photoPaths[1],       //  0 EV
+        overexposedPath: photoPaths[2],  // +2 EV
+      );
+
+      // Save to Photos app
+      try {
+        final hasAccess = await Gal.hasAccess(toAlbum: true);
+        if (!hasAccess) {
+          await Gal.requestAccess(toAlbum: true);
+        }
+        await Gal.putImage(blendedPath, album: 'ManualCam');
+        print('✅ HDR+ blended image saved to Photos');
+      } catch (e) {
+        print('❌ Photos save error: $e');
+      }
+
+      // Cleanup temp bracket files (para hindi mag-clog)
+      for (final p in photoPaths) {
+        try {
+          await File(p).delete();
+        } catch (_) {}
+      }
+
+      return blendedPath;
+    } on PlatformException catch (e) {
+      throw Exception('HDR+ capture failed: ${e.message}');
+    }
+  }
+
+  /// Blend 3 bracket photos using luminance-weighted merge.
+  /// Ito ang core ng "HDR+" — para saktong exposure sa lahat ng parte ng photo.
+  Future<String> _blendBracketPhotos({
+    required String underexposedPath,
+    required String normalPath,
+    required String overexposedPath,
+  }) async {
+    // Decode all 3 photos
+    final under = img.decodeJpg(await File(underexposedPath).readAsBytes());
+    final normal = img.decodeJpg(await File(normalPath).readAsBytes());
+    final over = img.decodeJpg(await File(overexposedPath).readAsBytes());
+
+    if (under == null || normal == null || over == null) {
+      throw Exception('Failed to decode bracket photos');
+    }
+
+    // All 3 must be same size (from same camera, same session)
+    final w = normal.width;
+    final h = normal.height;
+
+    if (under.width != w || over.width != w) {
+      throw Exception('Bracket photos have mismatched dimensions');
+    }
+
+    print('📸 Blending ${w}x$h photos...');
+
+    // Create output image
+    final result = img.Image(width: w, height: h);
+
+    // For each pixel, compute weighted blend based on normal exposure luminance
+    // Weighting logic:
+    // - If pixel sa normal ay OVEREXPOSED (bright, >200) → gamitin yung under
+    // - If pixel sa normal ay UNDEREXPOSED (dark, <60) → gamitin yung over
+    // - Kung mid → mix of normal at neighbors
+    //
+    // Gumamit tayo ng smooth transitions (weight curves) para hindi visible ang seams.
+
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        final nPix = normal.getPixel(x, y);
+        final uPix = under.getPixel(x, y);
+        final oPix = over.getPixel(x, y);
+
+        // Compute luminance ng normal pixel (0-255)
+        final nR = nPix.r.toDouble();
+        final nG = nPix.g.toDouble();
+        final nB = nPix.b.toDouble();
+        final lum = 0.299 * nR + 0.587 * nG + 0.114 * nB;
+
+        // Compute weights (each 0.0 to 1.0, summing to 1.0)
+        double wUnder, wNormal, wOver;
+
+        if (lum > 200) {
+          // Very bright — favor under
+          final t = ((lum - 200) / 55).clamp(0.0, 1.0);
+          wUnder = 0.5 + 0.5 * t;
+          wNormal = 0.5 - 0.4 * t;
+          wOver = 0.1 - 0.1 * t;
+        } else if (lum > 140) {
+          // Highlights — mix under+normal
+          final t = ((lum - 140) / 60).clamp(0.0, 1.0);
+          wUnder = 0.2 + 0.3 * t;
+          wNormal = 0.7 - 0.2 * t;
+          wOver = 0.1 - 0.1 * t;
+        } else if (lum < 55) {
+          // Very dark — favor over
+          final t = ((55 - lum) / 55).clamp(0.0, 1.0);
+          wOver = 0.5 + 0.5 * t;
+          wNormal = 0.5 - 0.4 * t;
+          wUnder = 0.1 - 0.1 * t;
+        } else if (lum < 115) {
+          // Shadows — mix normal+over
+          final t = ((115 - lum) / 60).clamp(0.0, 1.0);
+          wOver = 0.2 + 0.3 * t;
+          wNormal = 0.7 - 0.2 * t;
+          wUnder = 0.1 - 0.1 * t;
+        } else {
+          // Midtones — mostly normal
+          wUnder = 0.15;
+          wNormal = 0.7;
+          wOver = 0.15;
+        }
+
+        // Ensure non-negative and normalize
+        wUnder = wUnder.clamp(0.0, 1.0);
+        wNormal = wNormal.clamp(0.0, 1.0);
+        wOver = wOver.clamp(0.0, 1.0);
+        final total = wUnder + wNormal + wOver;
+        wUnder /= total;
+        wNormal /= total;
+        wOver /= total;
+
+        // Weighted blend of RGB channels
+        final r = (uPix.r * wUnder + nPix.r * wNormal + oPix.r * wOver).round().clamp(0, 255);
+        final g = (uPix.g * wUnder + nPix.g * wNormal + oPix.g * wOver).round().clamp(0, 255);
+        final b = (uPix.b * wUnder + nPix.b * wNormal + oPix.b * wOver).round().clamp(0, 255);
+
+        result.setPixelRgb(x, y, r, g, b);
+      }
+    }
+
+    // Apply gentle contrast + saturation boost para pop
+    final adjusted = img.adjustColor(result, contrast: 1.08, saturation: 1.1);
+
+    // Encode as JPEG
+    final jpg = img.encodeJpg(adjusted, quality: 92);
+
+    // Save
+    final tmpDir = Directory.systemTemp;
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final outPath = '${tmpDir.path}/hdrplus_$timestamp.jpg';
+    await File(outPath).writeAsBytes(jpg);
+
+    print('✅ HDR+ blend saved: $outPath');
+    return outPath;
+  }
+
   Future<String?> _softwareZoomCrop(String jpegPath, double zoomFactor) async {
     if (zoomFactor <= 1.01) return jpegPath;
 
     try {
       final file = File(jpegPath);
       final bytes = await file.readAsBytes();
-
       final decoded = img.decodeJpg(bytes);
       if (decoded == null) return null;
 
-      // Center crop by zoomFactor
-      // At zoom = 2.0x, keep 50% ng pixels (1/2)
-      // At zoom = 3.0x, keep 33% (1/3)
       final cropFactor = 1.0 / zoomFactor;
       final newW = (decoded.width * cropFactor).round();
       final newH = (decoded.height * cropFactor).round();
@@ -222,14 +366,9 @@ class NativeCamera {
         height: newH,
       );
 
-      // Re-encode as JPEG
       final croppedBytes = img.encodeJpg(cropped, quality: 92);
-
-      // Write to new file
       final newPath = jpegPath.replaceFirst('.jpg', '_zoom.jpg');
-      final newFile = File(newPath);
-      await newFile.writeAsBytes(croppedBytes);
-
+      await File(newPath).writeAsBytes(croppedBytes);
       return newPath;
     } catch (e) {
       print('Software crop error: $e');
