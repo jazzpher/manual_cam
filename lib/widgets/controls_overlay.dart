@@ -12,7 +12,11 @@ class ControlsOverlay extends StatelessWidget {
   final bool isHDREnabled, isRawEnabled, isHdrPlusEnabled, isCapturing;
   final int uiOrientation;
   final SettingType activeDial;
-  final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
+  final Function(double) onISOChanged,
+      onShutterSpeedChanged,
+      onExposureBiasChanged,
+      onZoomChanged,
+      onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
   final Function(SettingType) onSelectDial;
   final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleHdrPlus;
@@ -53,10 +57,14 @@ class ControlsOverlay extends StatelessWidget {
 
   double get _rotationAngle {
     switch (uiOrientation) {
-      case 1: return -math.pi / 2;
-      case 2: return math.pi;
-      case 3: return math.pi / 2;
-      default: return 0;
+      case 1:
+        return -math.pi / 2;
+      case 2:
+        return math.pi;
+      case 3:
+        return math.pi / 2;
+      default:
+        return 0;
     }
   }
 
@@ -79,8 +87,7 @@ class ControlsOverlay extends StatelessWidget {
           _buildAspectRatioSelector(),
           const SizedBox(height: 8),
           // === RULER DIAL (lumalabas kapag may active setting) ===
-          if (activeDial != SettingType.none)
-            _buildRulerDial(),
+          if (activeDial != SettingType.none) _buildRulerDial(),
           const SizedBox(height: 6),
           _buildSettingPicker(),
           const SizedBox(height: 12),
@@ -98,43 +105,55 @@ class ControlsOverlay extends StatelessWidget {
         children: [
           GestureDetector(
             onTap: () {
-              final next = flashMode == 'off' ? 'on' : flashMode == 'on' ? 'auto' : 'off';
+              final next = flashMode == 'off'
+                  ? 'on'
+                  : flashMode == 'on'
+                  ? 'auto'
+                  : 'off';
               onFlashModeChanged(next);
             },
-            child: _rotate(_pill(
-              icon: flashMode == 'off'
-                  ? Icons.flash_off
-                  : flashMode == 'on'
-                      ? Icons.flash_on
-                      : Icons.flash_auto,
-              label: flashMode.toUpperCase(),
-              color: flashMode == 'off' ? Colors.grey : Colors.amber,
-            )),
+            child: _rotate(
+              _pill(
+                icon: flashMode == 'off'
+                    ? Icons.flash_off
+                    : flashMode == 'on'
+                    ? Icons.flash_on
+                    : Icons.flash_auto,
+                label: flashMode.toUpperCase(),
+                color: flashMode == 'off' ? Colors.grey : Colors.amber,
+              ),
+            ),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleHDR,
-            child: _rotate(_pill(
-              label: 'HDR',
-              color: isHDREnabled ? Colors.amber : Colors.grey,
-            )),
+            child: _rotate(
+              _pill(
+                label: 'HDR',
+                color: isHDREnabled ? Colors.amber : Colors.grey,
+              ),
+            ),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleHdrPlus,
-            child: _rotate(_pill(
-              icon: Icons.hdr_on,
-              label: 'HDR+',
-              color: isHdrPlusEnabled ? Colors.greenAccent : Colors.grey,
-            )),
+            child: _rotate(
+              _pill(
+                icon: Icons.hdr_on,
+                label: 'HDR+',
+                color: isHdrPlusEnabled ? Colors.greenAccent : Colors.grey,
+              ),
+            ),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleRAW,
-            child: _rotate(_pill(
-              label: 'RAW',
-              color: isRawEnabled ? Colors.amber : Colors.grey,
-            )),
+            child: _rotate(
+              _pill(
+                label: 'RAW',
+                color: isRawEnabled ? Colors.amber : Colors.grey,
+              ),
+            ),
           ),
           const Spacer(),
           _rotate(_pill(label: 'MANUAL', color: Colors.amber)),
@@ -158,7 +177,14 @@ class ControlsOverlay extends StatelessWidget {
             Icon(icon, color: color, size: 12),
             const SizedBox(width: 3),
           ],
-          Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
@@ -175,20 +201,34 @@ class ControlsOverlay extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 3),
             child: GestureDetector(
               onTap: () => onAspectRatioChanged(ratio),
-              child: _rotate(Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isSelected ? Colors.amber.withOpacity(0.3) : Colors.black54,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: isSelected ? Colors.amber : Colors.white24, width: 1),
-                ),
-                child: Text(ratio,
+              child: _rotate(
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.amber.withOpacity(0.3)
+                        : Colors.black54,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: isSelected ? Colors.amber : Colors.white24,
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    ratio,
                     style: TextStyle(
                       color: isSelected ? Colors.amber : Colors.white70,
                       fontSize: 11,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    )),
-              )),
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ),
             ),
           );
         }).toList(),
@@ -216,7 +256,8 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.ev,
             label: 'EV',
-            value: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
+            value:
+                '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
           ),
           _pickerButton(
             type: SettingType.focus,
@@ -245,36 +286,44 @@ class ControlsOverlay extends StatelessWidget {
         onSelectDial(isActive ? SettingType.none : type);
       },
       behavior: HitTestBehavior.opaque,
-      child: _rotate(Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        decoration: BoxDecoration(
-          color: isActive ? Colors.amber.withOpacity(0.25) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isActive ? Colors.amber : Colors.transparent,
-            width: 1,
+      child: _rotate(
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: isActive
+                ? Colors.amber.withOpacity(0.25)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isActive ? Colors.amber : Colors.transparent,
+              width: 1,
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(value,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                value,
                 style: TextStyle(
                   color: isActive ? Colors.amber : Colors.white,
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
                   fontFamily: 'monospace',
-                )),
-            const SizedBox(height: 2),
-            Text(label,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
                 style: TextStyle(
                   color: isActive ? Colors.amber : Colors.grey,
                   fontSize: 8,
                   fontWeight: FontWeight.w600,
-                )),
-          ],
+                ),
+              ),
+            ],
+          ),
         ),
-      )),
+      ),
     );
   }
 
@@ -290,7 +339,9 @@ class ControlsOverlay extends StatelessWidget {
 
     switch (activeDial) {
       case SettingType.shutter:
-        currentValue = _shutterIndex(_secondsFromLabel(shutterSpeed)).toDouble();
+        currentValue = _shutterIndex(
+          _secondsFromLabel(shutterSpeed),
+        ).toDouble();
         minValue = 0;
         maxValue = (shutterSpeedValues.length - 1).toDouble();
         label = shutterSpeed;
@@ -312,7 +363,8 @@ class ControlsOverlay extends StatelessWidget {
         currentValue = exposureBias.clamp(-4.0, 4.0);
         minValue = -4.0;
         maxValue = 4.0;
-        label = '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV';
+        label =
+            '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV';
         divisions = 32;
         callback = onExposureBiasChanged;
         break;
@@ -344,56 +396,62 @@ class ControlsOverlay extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.amber.withOpacity(0.5), width: 1),
       ),
-      child: _rotate(Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Current value label
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.amber,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'monospace',
+      child: _rotate(
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Current value label
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.amber,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          // Ruler with tick marks
-          SizedBox(
-            height: 44,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return CustomPaint(
-                  size: Size(constraints.maxWidth, 44),
-                  painter: _RulerPainter(
-                    value: currentValue,
-                    min: minValue,
-                    max: maxValue,
-                  ),
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      activeTrackColor: Colors.transparent,
-                      inactiveTrackColor: Colors.transparent,
-                      thumbColor: Colors.transparent,
-                      overlayColor: Colors.transparent,
-                      trackHeight: 40,
-                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 20),
-                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 25),
-                    ),
-                    child: Slider(
+            const SizedBox(height: 8),
+            // Ruler with tick marks
+            SizedBox(
+              height: 44,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return CustomPaint(
+                    size: Size(constraints.maxWidth, 44),
+                    painter: _RulerPainter(
                       value: currentValue,
                       min: minValue,
                       max: maxValue,
-                      divisions: divisions,
-                      onChanged: callback,
                     ),
-                  ),
-                );
-              },
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: Colors.transparent,
+                        inactiveTrackColor: Colors.transparent,
+                        thumbColor: Colors.transparent,
+                        overlayColor: Colors.transparent,
+                        trackHeight: 40,
+                        thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 20,
+                        ),
+                        overlayShape: const RoundSliderOverlayShape(
+                          overlayRadius: 25,
+                        ),
+                      ),
+                      child: Slider(
+                        value: currentValue,
+                        min: minValue,
+                        max: maxValue,
+                        divisions: divisions,
+                        onChanged: callback,
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
-        ],
-      )),
+          ],
+        ),
+      ),
     );
   }
 
@@ -455,14 +513,21 @@ class ControlsOverlay extends StatelessWidget {
                     ? const SizedBox(
                         width: 24,
                         height: 24,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
                     : Container(
                         width: 63,
                         height: 63,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isHdrPlusEnabled ? Colors.greenAccent : Colors.white,
-                        )),
+                          color: isHdrPlusEnabled
+                              ? Colors.greenAccent
+                              : Colors.white,
+                        ),
+                      ),
               ),
             ),
           ),
@@ -480,11 +545,7 @@ class _RulerPainter extends CustomPainter {
   final double min;
   final double max;
 
-  _RulerPainter({
-    required this.value,
-    required this.min,
-    required this.max,
-  });
+  _RulerPainter({required this.value, required this.min, required this.max});
 
   @override
   void paint(Canvas canvas, Size size) {
