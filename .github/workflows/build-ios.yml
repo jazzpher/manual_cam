@@ -1,0 +1,117 @@
+name: Build Unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-ios:
+    name: ManualCam iOS
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show tool versions
+        run: |
+          flutter --version
+          xcodebuild -version
+          pod --version
+
+      - name: Clean and install Flutter packages
+        run: |
+          flutter clean
+          rm -rf ios/Pods ios/Podfile.lock ios/.symlinks build || true
+          flutter pub get
+
+      - name: Add native Swift files to Runner target
+        run: |
+          sudo gem install xcodeproj --no-document
+          cd ios
+          ruby <<'RUBY'
+          require 'xcodeproj'
+
+          project = Xcodeproj::Project.open('Runner.xcodeproj')
+          target = project.targets.find { |item| item.name == 'Runner' }
+          runner_group = project.main_group['Runner']
+
+          abort('Runner target not found') unless target
+          abort('Runner group not found') unless runner_group
+
+          ['CameraManager.swift', 'CameraPreviewView.swift'].each do |filename|
+            disk_path = "Runner/#{filename}"
+            abort("Missing #{disk_path}") unless File.exist?(disk_path)
+
+            file_ref = runner_group.files.find { |file| file.path == filename }
+            file_ref ||= runner_group.new_reference(filename)
+
+            already_in_sources = target.source_build_phase.files.any? do |build_file|
+              build_file.file_ref == file_ref
+            end
+            target.source_build_phase.add_file_reference(file_ref) unless already_in_sources
+
+            puts "Added #{filename} to Runner target"
+          end
+
+          project.save
+          RUBY
+          cd ..
+
+      - name: Generate iOS build configuration
+        run: flutter build ios --release --no-codesign --config-only
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build unsigned iOS app
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        run: |
+          set -e
+
+          APP_PATH=""
+          for candidate in \
+            build/ios/iphoneos/Runner.app \
+            build/ios/Release-iphoneos/Runner.app \
+            build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app
+          do
+            if [ -d "$candidate" ]; then
+              APP_PATH="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$APP_PATH" ]; then
+            echo "Runner.app was not found"
+            find build/ios -name "*.app" -type d || true
+            exit 1
+          fi
+
+          rm -rf Payload build/ios/ipa
+          mkdir -p Payload build/ios/ipa
+          cp -R "$APP_PATH" Payload/Runner.app
+          zip -qry build/ios/ipa/manual_cam.ipa Payload
+          rm -rf Payload
+
+          ls -lh build/ios/ipa/manual_cam.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-cam-unsigned-ipa
+          path: build/ios/ipa/manual_cam.ipa
+          if-no-files-found: error
+          retention-days: 7
