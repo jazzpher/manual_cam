@@ -8,12 +8,9 @@ class ControlsOverlay extends StatelessWidget {
   final List<String> aspectRatios;
   final bool isHDREnabled, isRawEnabled, isHdrPlusEnabled, isCapturing;
   final int uiOrientation;
-  final bool showISOSlider, showEVSlider, showShutterPicker, showFocusSlider, showZoomSlider;
   final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
   final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleHdrPlus;
-  final VoidCallback onToggleISOSlider, onToggleEVSlider, onToggleShutterPicker, onToggleFocusSlider, onToggleZoomSlider;
-  final VoidCallback onCloseAllPopups;
 
   const ControlsOverlay({
     super.key,
@@ -45,21 +42,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onToggleHDR,
     required this.onToggleRAW,
     required this.onToggleHdrPlus,
-    required this.showISOSlider,
-    required this.onToggleISOSlider,
-    required this.showEVSlider,
-    required this.onToggleEVSlider,
-    required this.showShutterPicker,
-    required this.onToggleShutterPicker,
-    required this.showFocusSlider,
-    required this.onToggleFocusSlider,
-    required this.showZoomSlider,
-    required this.onToggleZoomSlider,
-    required this.onCloseAllPopups,
   });
-
-  bool get _anyPopupOpen =>
-      showISOSlider || showEVSlider || showShutterPicker || showFocusSlider || showZoomSlider;
 
   double get _rotationAngle {
     switch (uiOrientation) {
@@ -79,38 +62,41 @@ class ControlsOverlay extends StatelessWidget {
     );
   }
 
+  // Find nearest shutter value sa slider position
+  double _shutterSecondsFromIndex(double index) {
+    final i = index.round().clamp(0, shutterSpeedValues.length - 1);
+    return shutterSpeedValues[i];
+  }
+
+  double _shutterIndexFromValue(double seconds) {
+    // Find closest match
+    int closestIdx = 0;
+    double closestDiff = double.infinity;
+    for (int i = 0; i < shutterSpeedValues.length; i++) {
+      final diff = (shutterSpeedValues[i] - seconds).abs();
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        closestIdx = i;
+      }
+    }
+    return closestIdx.toDouble();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        if (_anyPopupOpen)
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: onCloseAllPopups,
-              child: Container(color: Colors.transparent),
-            ),
-          ),
-
-        SafeArea(
-          child: Column(
-            children: [
-              _buildTopBar(),
-              const Spacer(),
-              _buildSettingsDisplay(),
-              const SizedBox(height: 8),
-              _buildBottomControls(),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
-
-        if (showISOSlider) _buildISOSliderPopup(context),
-        if (showEVSlider) _buildEVSliderPopup(context),
-        if (showShutterPicker) _buildShutterPickerPopup(context),
-        if (showFocusSlider) _buildFocusSliderPopup(context),
-        if (showZoomSlider) _buildZoomSliderPopup(context),
-      ],
+    return SafeArea(
+      child: Column(
+        children: [
+          _buildTopBar(),
+          const Spacer(),
+          _buildAspectRatioSelector(),
+          const SizedBox(height: 4),
+          _buildInlineSliders(context),
+          const SizedBox(height: 8),
+          _buildBottomControls(),
+          const SizedBox(height: 12),
+        ],
+      ),
     );
   }
 
@@ -143,7 +129,6 @@ class ControlsOverlay extends StatelessWidget {
             )),
           ),
           const SizedBox(width: 6),
-          // === BAGONG HDR+ PILL (green kapag ON, kasing color ng photography HDR icon) ===
           GestureDetector(
             onTap: onToggleHdrPlus,
             child: _rotate(_pill(
@@ -188,77 +173,185 @@ class ControlsOverlay extends StatelessWidget {
     );
   }
 
-  Widget _buildSettingsDisplay() {
+  Widget _buildAspectRatioSelector() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildSettingButton(label: 'SHUTTER', value: shutterSpeed, onTap: onToggleShutterPicker),
-              const SizedBox(width: 16),
-              _buildSettingButton(label: 'ISO', value: '${iso.toInt()}', onTap: onToggleISOSlider),
-              const SizedBox(width: 16),
-              _buildSettingButton(label: 'EV', value: exposureBias.toStringAsFixed(1), onTap: onToggleEVSlider),
-              const SizedBox(width: 16),
-              _buildSettingButton(label: 'FOCUS', value: focus.toStringAsFixed(2), onTap: onToggleFocusSlider),
-              const SizedBox(width: 16),
-              _buildSettingButton(label: 'ZOOM', value: '${zoom.toStringAsFixed(1)}x', onTap: onToggleZoomSlider),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: aspectRatios.map((ratio) {
-              final isSelected = ratio == aspectRatio;
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: GestureDetector(
-                  onTap: () => onAspectRatioChanged(ratio),
-                  child: _rotate(Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isSelected ? Colors.amber.withOpacity(0.3) : Colors.black38,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: isSelected ? Colors.amber : Colors.white24, width: 1),
-                    ),
-                    child: Text(ratio,
-                        style: TextStyle(
-                          color: isSelected ? Colors.amber : Colors.white70,
-                          fontSize: 11,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        )),
-                  )),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: aspectRatios.map((ratio) {
+          final isSelected = ratio == aspectRatio;
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: GestureDetector(
+              onTap: () => onAspectRatioChanged(ratio),
+              child: _rotate(Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isSelected ? Colors.amber.withOpacity(0.3) : Colors.black54,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: isSelected ? Colors.amber : Colors.white24, width: 1),
                 ),
-              );
-            }).toList(),
+                child: Text(ratio,
+                    style: TextStyle(
+                      color: isSelected ? Colors.amber : Colors.white70,
+                      fontSize: 11,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    )),
+              )),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  // === INLINE SLIDERS (Halide-style, always visible) ===
+  Widget _buildInlineSliders(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildInlineSlider(
+            context: context,
+            label: 'SHUTTER',
+            valueText: shutterSpeed,
+            value: _shutterIndexFromValue(_secondsFromLabel(shutterSpeed)),
+            min: 0,
+            max: (shutterSpeedValues.length - 1).toDouble(),
+            divisions: shutterSpeedValues.length - 1,
+            onChanged: (idx) => onShutterSpeedChanged(_shutterSecondsFromIndex(idx)),
+          ),
+          _buildInlineSlider(
+            context: context,
+            label: 'ISO',
+            valueText: iso.toInt().toString(),
+            value: iso.clamp(minISO, maxISO),
+            min: minISO,
+            max: maxISO,
+            divisions: 50,
+            onChanged: onISOChanged,
+          ),
+          _buildInlineSlider(
+            context: context,
+            label: 'EV',
+            valueText: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
+            value: exposureBias.clamp(-4.0, 4.0),
+            min: -4.0,
+            max: 4.0,
+            divisions: 32,
+            onChanged: onExposureBiasChanged,
+          ),
+          _buildInlineSlider(
+            context: context,
+            label: 'FOCUS',
+            valueText: focus.toStringAsFixed(2),
+            value: focus.clamp(0.0, 1.0),
+            min: 0.0,
+            max: 1.0,
+            divisions: 100,
+            onChanged: onFocusChanged,
+          ),
+          _buildInlineSlider(
+            context: context,
+            label: 'ZOOM',
+            valueText: '${zoom.toStringAsFixed(1)}x',
+            value: zoom.clamp(1.0, maxZoom),
+            min: 1.0,
+            max: maxZoom,
+            divisions: ((maxZoom - 1.0) * 10).round().clamp(1, 100),
+            onChanged: onZoomChanged,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSettingButton({required String label, required String value, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: _rotate(Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'monospace',
-                )),
-            const SizedBox(height: 2),
-            Text(label, style: const TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.w500)),
-          ],
-        )),
+  // Reverse lookup: convert shutter label back to seconds
+  double _secondsFromLabel(String label) {
+    if (label.contains('"')) {
+      // e.g. "2\""
+      final n = double.tryParse(label.replaceAll('"', '')) ?? 1;
+      return n;
+    } else if (label.contains('/')) {
+      // e.g. "1/60"
+      final parts = label.split('/');
+      if (parts.length == 2) {
+        final denom = double.tryParse(parts[1]) ?? 60;
+        return 1 / denom;
+      }
+    }
+    return 1 / 60; // fallback
+  }
+
+  Widget _buildInlineSlider({
+    required BuildContext context,
+    required String label,
+    required String valueText,
+    required double value,
+    required double min,
+    required double max,
+    required int divisions,
+    required Function(double) onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          // Label
+          SizedBox(
+            width: 60,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.grey,
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.left,
+            ),
+          ),
+          // Slider
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: Colors.amber,
+                inactiveTrackColor: Colors.white24,
+                thumbColor: Colors.amber,
+                overlayColor: Colors.amber.withOpacity(0.2),
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+              ),
+              child: Slider(
+                value: value,
+                min: min,
+                max: max,
+                divisions: divisions,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+          // Value display
+          SizedBox(
+            width: 55,
+            child: Text(
+              valueText,
+              style: const TextStyle(
+                color: Colors.amber,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+              ),
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -310,207 +403,6 @@ class ControlsOverlay extends StatelessWidget {
           const Spacer(),
           const SizedBox(width: 50, height: 50),
         ],
-      ),
-    );
-  }
-
-  Widget _popupCard({
-    required String title,
-    required VoidCallback onClose,
-    required Widget child,
-  }) {
-    return Positioned(
-      bottom: 220,
-      left: 12,
-      right: 12,
-      child: Material(
-        color: Colors.transparent,
-        child: GestureDetector(
-          onTap: () {},
-          behavior: HitTestBehavior.opaque,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 16),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.92),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                    ),
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: onClose,
-                        borderRadius: BorderRadius.circular(22),
-                        child: Container(
-                          width: 44,
-                          height: 44,
-                          alignment: Alignment.center,
-                          child: Container(
-                            width: 30,
-                            height: 30,
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.white12,
-                            ),
-                            child: const Icon(Icons.close, color: Colors.white, size: 18),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                child,
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _slider({
-    required BuildContext context,
-    required double value,
-    required double min,
-    required double max,
-    required String display,
-    required Function(double) onChanged,
-    int? divisions,
-  }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            activeTrackColor: Colors.amber,
-            inactiveTrackColor: Colors.white24,
-            thumbColor: Colors.amber,
-            overlayColor: Colors.amber.withOpacity(0.2),
-            trackHeight: 4,
-          ),
-          child: Slider(
-            value: value.clamp(min, max),
-            min: min,
-            max: max,
-            divisions: divisions,
-            onChanged: onChanged,
-          ),
-        ),
-        Text(display,
-            style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 16)),
-      ],
-    );
-  }
-
-  Widget _buildISOSliderPopup(BuildContext context) {
-    return _popupCard(
-      title: 'ISO',
-      onClose: onToggleISOSlider,
-      child: _slider(
-        context: context,
-        value: iso,
-        min: minISO,
-        max: maxISO,
-        display: 'ISO ${iso.toInt()}',
-        divisions: 50,
-        onChanged: onISOChanged,
-      ),
-    );
-  }
-
-  Widget _buildEVSliderPopup(BuildContext context) {
-    return _popupCard(
-      title: 'Exposure Bias (EV)',
-      onClose: onToggleEVSlider,
-      child: _slider(
-        context: context,
-        value: exposureBias,
-        min: -4.0,
-        max: 4.0,
-        display: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV',
-        divisions: 32,
-        onChanged: onExposureBiasChanged,
-      ),
-    );
-  }
-
-  Widget _buildFocusSliderPopup(BuildContext context) {
-    return _popupCard(
-      title: 'Manual Focus  (0 = infinity, 1 = macro)',
-      onClose: onToggleFocusSlider,
-      child: _slider(
-        context: context,
-        value: focus,
-        min: 0.0,
-        max: 1.0,
-        display: focus.toStringAsFixed(2),
-        divisions: 100,
-        onChanged: onFocusChanged,
-      ),
-    );
-  }
-
-  Widget _buildZoomSliderPopup(BuildContext context) {
-    return _popupCard(
-      title: 'Zoom',
-      onClose: onToggleZoomSlider,
-      child: _slider(
-        context: context,
-        value: zoom,
-        min: 1.0,
-        max: maxZoom,
-        display: '${zoom.toStringAsFixed(1)}x',
-        divisions: ((maxZoom - 1.0) * 10).round().clamp(1, 100),
-        onChanged: onZoomChanged,
-      ),
-    );
-  }
-
-  Widget _buildShutterPickerPopup(BuildContext context) {
-    return _popupCard(
-      title: 'Shutter Speed',
-      onClose: onToggleShutterPicker,
-      child: SizedBox(
-        height: 60,
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          itemCount: shutterSpeedValues.length,
-          itemBuilder: (context, i) {
-            final val = shutterSpeedValues[i];
-            final label = val >= 1 ? '${val.toInt()}"' : '1/${(1 / val).round()}';
-            final selected = label == shutterSpeed;
-            return GestureDetector(
-              onTap: () => onShutterSpeedChanged(val),
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: selected ? Colors.amber.withOpacity(0.3) : Colors.white10,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: selected ? Colors.amber : Colors.white24),
-                ),
-                child: Center(
-                  child: Text(label,
-                      style: TextStyle(
-                        color: selected ? Colors.amber : Colors.white70,
-                        fontWeight: FontWeight.bold,
-                      )),
-                ),
-              ),
-            );
-          },
-        ),
       ),
     );
   }

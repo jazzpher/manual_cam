@@ -58,17 +58,11 @@ class _CameraScreenState extends State<CameraScreen> {
   double _focus = 0.5;
   bool _isHDREnabled = false;
   bool _isRawEnabled = false;
-  bool _isHdrPlusEnabled = false; // === BAGO: Single-shot HDR mode ===
+  bool _isHdrPlusEnabled = false;
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
   bool _isCapturing = false;
-
-  bool _showISOSlider = false;
-  bool _showEVSlider = false;
-  bool _showShutterPicker = false;
-  bool _showFocusSlider = false;
-  bool _showZoomSlider = false;
 
   Offset? _tapFocusPoint;
 
@@ -180,15 +174,12 @@ class _CameraScreenState extends State<CameraScreen> {
     await _camera.setRAW(_isRawEnabled);
   }
 
-  // === BAGONG TOGGLE: SINGLE-SHOT HDR ===
-  // Kapag ON, force RAW mode din para may attached JPEG at DNG both saved.
   Future<void> _toggleHdrPlus() async {
     setState(() {
       _isHdrPlusEnabled = !_isHdrPlusEnabled;
       _camera.hdrMode = _isHdrPlusEnabled;
     });
 
-    // Auto-enable RAW pag naka-HDR (para may DNG na backup at may JPEG preview to work with)
     if (_isHdrPlusEnabled && _supportsRAW && !_isRawEnabled) {
       setState(() => _isRawEnabled = true);
       await _camera.setRAW(true);
@@ -198,7 +189,7 @@ class _CameraScreenState extends State<CameraScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(_isHdrPlusEnabled
-              ? '🌈 HDR mode ON — single-shot digital exposure bracketing (handhold-friendly)'
+              ? '🌈 HDR mode ON — single-shot digital exposure bracketing'
               : '🌈 HDR mode OFF — normal capture'),
           backgroundColor: Colors.green.shade700,
           duration: const Duration(seconds: 3),
@@ -267,16 +258,6 @@ class _CameraScreenState extends State<CameraScreen> {
     if (mounted) setState(() => _isCapturing = false);
   }
 
-  void _closeAllPopups() {
-    setState(() {
-      _showISOSlider = false;
-      _showEVSlider = false;
-      _showShutterPicker = false;
-      _showFocusSlider = false;
-      _showZoomSlider = false;
-    });
-  }
-
   String _modeLabel() {
     final parts = <String>[];
     if (_isRawEnabled) parts.add('RAW+JPEG');
@@ -335,12 +316,13 @@ class _CameraScreenState extends State<CameraScreen> {
 
           if (_tapFocusPoint != null) _buildFocusReticle(_tapFocusPoint!),
 
+          // Bottom gradient for slider readability
           Positioned(
             bottom: 0,
             left: 0,
             right: 0,
             child: Container(
-              height: 320,
+              height: 360,
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -380,37 +362,6 @@ class _CameraScreenState extends State<CameraScreen> {
             onToggleHDR: _toggleHDR,
             onToggleRAW: _toggleRAW,
             onToggleHdrPlus: _toggleHdrPlus,
-            onCloseAllPopups: _closeAllPopups,
-            showISOSlider: _showISOSlider,
-            onToggleISOSlider: () {
-              final wasOpen = _showISOSlider;
-              _closeAllPopups();
-              setState(() => _showISOSlider = !wasOpen);
-            },
-            showEVSlider: _showEVSlider,
-            onToggleEVSlider: () {
-              final wasOpen = _showEVSlider;
-              _closeAllPopups();
-              setState(() => _showEVSlider = !wasOpen);
-            },
-            showShutterPicker: _showShutterPicker,
-            onToggleShutterPicker: () {
-              final wasOpen = _showShutterPicker;
-              _closeAllPopups();
-              setState(() => _showShutterPicker = !wasOpen);
-            },
-            showFocusSlider: _showFocusSlider,
-            onToggleFocusSlider: () {
-              final wasOpen = _showFocusSlider;
-              _closeAllPopups();
-              setState(() => _showFocusSlider = !wasOpen);
-            },
-            showZoomSlider: _showZoomSlider,
-            onToggleZoomSlider: () {
-              final wasOpen = _showZoomSlider;
-              _closeAllPopups();
-              setState(() => _showZoomSlider = !wasOpen);
-            },
           ),
 
           Positioned(
