@@ -1,11 +1,9 @@
-import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:gal/gal.dart';
-import 'package:image/image.dart' as img;
 
 /// Bridge sa native iOS AVFoundation camera.
-/// HDR+ processing ay ginagawa sa Swift side using CIRAWFilter (true 14-bit).
+/// HDR+ processing at software zoom crop ay ginagawa sa Swift side (Metal GPU).
 class NativeCamera {
   static const _channel = MethodChannel('manual_cam/camera');
 
@@ -26,17 +24,15 @@ class NativeCamera {
   bool get supportsHDR => _capabilities['supportsHDR'] as bool? ?? false;
   bool get supportsRAW => _capabilities['supportsRAW'] as bool? ?? false;
 
-  /// [CHANGED] HDR+ setter — auto-enables RAW mode kasi kailangan ng DNG
+  /// HDR+ setter — auto-enables RAW mode kasi kailangan ng DNG
   /// para sa true 14-bit CIRAWFilter processing sa Swift side.
   bool get hdrMode => _hdrMode;
   set hdrMode(bool enabled) {
     _hdrMode = enabled;
-    // Fire-and-forget sync sa Swift
     _channel.invokeMethod('setHdrPlus', {'enabled': enabled}).catchError((e) {
       print('setHdrPlus error: $e');
     });
-    // [NEW] IMPORTANT: Auto-enable RAW mode kapag HDR+ is ON
-    // Kasi walang DNG = walang 14-bit source = walang HDR+ processing possible
+    // Auto-enable RAW kapag HDR+ is ON — walang DNG = walang 14-bit HDR
     if (enabled && supportsRAW) {
       _channel.invokeMethod('setRAW', {'enabled': true}).catchError((e) {
         print('auto-enable RAW error: $e');
@@ -104,7 +100,7 @@ class NativeCamera {
   }
 
   Future<void> setRAW(bool enabled) async {
-    // [NEW] Prevent disabling RAW kapag HDR+ ay ON
+    // Prevent disabling RAW kapag HDR+ ay ON
     if (!enabled && _hdrMode) {
       print('⚠️ Cannot disable RAW while HDR+ is ON (RAW is required for 14-bit HDR)');
       return;
@@ -122,7 +118,7 @@ class NativeCamera {
     }
   }
 
-  /// Regular capture. Native 14-bit HDR+ ay auto-applied sa Swift side kapag `hdrMode` ON.
+  /// Regular capture. HDR+ processing AT software zoom crop ay handled na sa Swift side.
   /// Yung DNG/RAW ay untouched (para sa Lightroom editing).
   Future<Map<String, String>> capturePhoto() async {
     try {
@@ -146,17 +142,8 @@ class NativeCamera {
 
       if (paths.isEmpty) throw Exception('No files created');
 
-      // Software zoom crop for RAW mode (kung naka-RAW at zoomed > 1x)
-      if (softwareZoom > 1.01 && paths['raw'] != null && paths['jpeg'] != null) {
-        try {
-          final croppedJpegPath = await _softwareZoomCrop(paths['jpeg']!, softwareZoom);
-          if (croppedJpegPath != null) paths['jpeg'] = croppedJpegPath;
-        } catch (e) { print('⚠️ JPEG crop failed: $e'); }
-      }
-
-      // NOTE: True 14-bit HDR+ processing ay ginagawa na sa native Swift side
-      // via CIRAWFilter. Yung JPEG na binalik sa amin ay HDR-processed na kung
-      // naka-enable ang hdrMode.
+      // NOTE: Software zoom crop AT HDR+ processing ay ginagawa na sa Swift side.
+      // Yung JPEG na binalik sa amin ay pre-processed na (kung applicable).
 
       // Save to Photos app
       try {
@@ -175,31 +162,6 @@ class NativeCamera {
       return paths;
     } on PlatformException catch (e) {
       throw Exception('Capture failed: ${e.message}');
-    }
-  }
-
-  Future<String?> _softwareZoomCrop(String jpegPath, double zoomFactor) async {
-    if (zoomFactor <= 1.01) return jpegPath;
-    try {
-      final file = File(jpegPath);
-      final bytes = await file.readAsBytes();
-      final decoded = img.decodeJpg(bytes);
-      if (decoded == null) return null;
-
-      final cropFactor = 1.0 / zoomFactor;
-      final newW = (decoded.width * cropFactor).round();
-      final newH = (decoded.height * cropFactor).round();
-      final offsetX = ((decoded.width - newW) / 2).round();
-      final offsetY = ((decoded.height - newH) / 2).round();
-
-      final cropped = img.copyCrop(decoded, x: offsetX, y: offsetY, width: newW, height: newH);
-      final croppedBytes = img.encodeJpg(cropped, quality: 92);
-      final newPath = jpegPath.replaceFirst('.jpg', '_zoom.jpg');
-      await File(newPath).writeAsBytes(croppedBytes);
-      return newPath;
-    } catch (e) {
-      print('Software crop error: $e');
-      return null;
     }
   }
 }

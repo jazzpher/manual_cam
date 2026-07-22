@@ -343,17 +343,84 @@ class CameraManager: NSObject {
         }
     }
 
+    // [NEW] === ADAPTIVE HDR VALUES via HISTOGRAM ANALYSIS ===
+    // Analyze scene brightness using downsampled image + area average.
+    // Returns tuple: (exposure adjustment, shadow bias, detail amount)
+    //
+    // Logic:
+    //   - Dark scene (mean < 60): mag-lift lang ng shadows, minimal highlight recovery
+    //   - Bright scene (mean > 180): aggressive highlight recovery
+    //   - Balanced scene (60-180): moderate both
+    private func analyzeScene(_ ciImage: CIImage) -> (exposure: Float, shadowBias: Float, detailAmount: Float) {
+        // Downsample to tiny size para mabilis mag-analyze (yung pixel average lang naman ang kailangan)
+        let extent = ciImage.extent
+
+        // Use CIAreaAverage filter — GPU-accelerated single-pixel output
+        guard let filter = CIFilter(name: "CIAreaAverage") else {
+            return (-0.3, 0.4, 0.2)  // Fallback to defaults
+        }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgRect: extent), forKey: kCIInputExtentKey)
+
+        guard let output = filter.outputImage else {
+            return (-0.3, 0.4, 0.2)
+        }
+
+        // Render single pixel to get average RGB
+        var bitmap = [UInt8](repeating: 0, count: 4)
+        ciContext.render(output,
+                         toBitmap: &bitmap,
+                         rowBytes: 4,
+                         bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                         format: .RGBA8,
+                         colorSpace: CGColorSpaceCreateDeviceRGB())
+
+        // Compute luminance (BT.601 weights)
+        let r = Float(bitmap[0])
+        let g = Float(bitmap[1])
+        let b = Float(bitmap[2])
+        let meanBrightness = (0.299 * r + 0.587 * g + 0.114 * b)  // 0-255
+
+        print("📊 Scene analysis: mean brightness = \(meanBrightness) / 255")
+
+        // Adaptive value curves
+        var exposure: Float
+        var shadowBias: Float
+        var detailAmount: Float
+
+        if meanBrightness < 60 {
+            // DARK SCENE — need mas maraming shadow lift, minimal highlight recovery
+            // Halimbawa: indoor low-light, night shots
+            let darkness = (60 - meanBrightness) / 60  // 0-1, more dark = higher
+            exposure = -0.1 * (1.0 - darkness)         // 0 to -0.1 (mas kaunting recovery)
+            shadowBias = 0.4 + 0.4 * darkness          // 0.4 to 0.8 (aggressive lift)
+            detailAmount = 0.15 + 0.15 * darkness      // 0.15 to 0.3
+            print("🌑 Dark scene detected: exposure=\(exposure), shadow=\(shadowBias)")
+        } else if meanBrightness > 180 {
+            // BRIGHT SCENE — need aggressive highlight recovery
+            // Halimbawa: outdoor daylight, snow, beach
+            let brightness = (meanBrightness - 180) / 75  // 0-1, more bright = higher
+            let brightnessCapped = min(brightness, 1.0)
+            exposure = -0.3 - 0.5 * brightnessCapped   // -0.3 to -0.8 (aggressive dim)
+            shadowBias = 0.3 - 0.1 * brightnessCapped  // 0.3 to 0.2 (moderate lift)
+            detailAmount = 0.2 + 0.1 * brightnessCapped
+            print("☀️ Bright scene detected: exposure=\(exposure), shadow=\(shadowBias)")
+        } else {
+            // BALANCED SCENE — moderate values (yung dating hardcoded)
+            exposure = -0.3
+            shadowBias = 0.4
+            detailAmount = 0.2
+            print("⚖️ Balanced scene: using default HDR values")
+        }
+
+        return (exposure, shadowBias, detailAmount)
+    }
+
     // === TRUE 14-BIT RAW HDR PROCESSING ===
     // Requires iOS 15.0+ (CIRAWFilter API)
-    // Ito ang core ng HDR+. Nag-p-process directly sa 12-14 bit RAW sensor data
-    // using CIRAWFilter — Apple's dedicated RAW processing filter.
     //
-    // Bakit true 14-bit:
-    // - CIRAWFilter decodes yung DNG sa native sensor precision (12-14 bits per channel)
-    // - Filter operations happen sa 32-bit float internally
-    // - Final render lang na-r-reduce to 8-bit for JPEG output
-    //
-    // Returns: Path to new HDR-processed JPEG file, or nil on failure.
+    // [CHANGED] Now uses adaptive HDR values via histogram analysis
+    // [NEW] GPU-based center-crop kung naka-zoom (dating sa Dart pa, mabagal)
     @available(iOS 15.0, *)
     private func applyRawHDR(dngURL: URL) -> String? {
         print("🌈 Loading RAW DNG for 14-bit HDR processing...")
@@ -363,42 +430,54 @@ class CameraManager: NSObject {
             return nil
         }
 
-        // === 14-bit HDR TONE MAPPING ===
-        // Since we're operating on RAW data, kaya nating gumawa ng aggressive
-        // adjustments na hindi ma-i-imagine sa 8-bit JPEG:
+        // First pass — get initial RAW output for scene analysis (before adjustments)
+        guard let initialOutput = rawFilter.outputImage else {
+            print("⚠️ Failed to get initial RAW output for analysis")
+            return nil
+        }
 
-        // 1. Highlight recovery — pull down bright areas
-        rawFilter.exposure = -0.3  // Slight overall exposure reduction to protect highlights
+        // [NEW] Analyze scene brightness for adaptive HDR
+        let (exposure, shadowBias, detailAmount) = analyzeScene(initialOutput)
 
-        // 2. Shadow lift via bias (mas maganda sa RAW)
-        rawFilter.shadowBias = 0.4  // Positive = lift shadows
-
-        // 3. Local contrast enhancement (preserves colors, adds depth)
-        rawFilter.detailAmount = 0.2  // Slight detail boost
-
-        // 4. Neutral color — walang saturation boost
-        //    (RAW ay maga-render with accurate colors as-is)
-
-        // Note: noiseReductionAmount is iOS 16+ only, tinanggal for compatibility
+        // Apply adaptive tone mapping
+        rawFilter.exposure = exposure
+        rawFilter.shadowBias = shadowBias
+        rawFilter.detailAmount = detailAmount
 
         guard var processed = rawFilter.outputImage else {
             print("⚠️ Failed to render RAW output image")
             return nil
         }
 
-        // === ADDITIONAL TONE MAPPING (Apple's local adjustment filter) ===
-        // Applied sa top ng RAW output para sa additional local contrast tuning
+        // Additional local tone mapping (Apple's CIHighlightShadowAdjust)
+        // Very subtle — mainly for local contrast tuning after RAW pipeline
         if let filter = CIFilter(name: "CIHighlightShadowAdjust") {
             filter.setValue(processed, forKey: kCIInputImageKey)
-            filter.setValue(-0.15, forKey: "inputHighlightAmount")   // Very subtle final highlight tame
-            filter.setValue(0.2, forKey: "inputShadowAmount")        // Very subtle final shadow lift
+            filter.setValue(-0.15, forKey: "inputHighlightAmount")
+            filter.setValue(0.2, forKey: "inputShadowAmount")
             filter.setValue(1.5, forKey: "inputRadius")
             if let output = filter.outputImage {
                 processed = output
             }
         }
 
-        // === RENDER TO JPEG via Metal GPU ===
+        // [NEW] === GPU-BASED SOFTWARE ZOOM CROP ===
+        // Kung naka-zoom > 1.0x, center-crop ang final image sa Swift side
+        // (mas mabilis kaysa Dart image package na CPU-bound)
+        if self.softwareZoomFactor > 1.01 {
+            let cropFactor = 1.0 / self.softwareZoomFactor
+            let extent = processed.extent
+            let cropWidth = extent.width * cropFactor
+            let cropHeight = extent.height * cropFactor
+            let cropX = extent.origin.x + (extent.width - cropWidth) / 2.0
+            let cropY = extent.origin.y + (extent.height - cropHeight) / 2.0
+
+            let cropRect = CGRect(x: cropX, y: cropY, width: cropWidth, height: cropHeight)
+            processed = processed.cropped(to: cropRect)
+            print("📸 GPU crop applied: \(self.softwareZoomFactor)x zoom, target rect=\(cropRect)")
+        }
+
+        // Render to JPEG via Metal GPU
         guard let cgImage = ciContext.createCGImage(processed, from: processed.extent) else {
             print("⚠️ Failed to render final CGImage")
             return nil
@@ -478,28 +557,23 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
         if receivedPhotoCount >= expectedPhotoCount || captureError != nil {
 
-            // === APPLY TRUE 14-BIT HDR AFTER LAHAT NG PHOTOS RECEIVED ===
-            // Kailangan lahat ng photos natin (both DNG at JPEG) bago mag-HDR
-            // kasi kailangan natin ng DNG file bilang input for CIRAWFilter
+            // APPLY TRUE 14-BIT HDR AFTER LAHAT NG PHOTOS RECEIVED
             if isHdrPlusEnabled, captureError == nil, let rawPath = pendingRawURL {
-                // iOS 15.0+ required para sa CIRAWFilter
                 if #available(iOS 15.0, *) {
-                    print("🌈 Starting true 14-bit RAW HDR pipeline...")
+                    print("🌈 Starting true 14-bit RAW HDR pipeline (adaptive)...")
                     let rawURL = URL(fileURLWithPath: rawPath)
 
-                    // Process asynchronously para hindi mag-block ang delegate queue
                     DispatchQueue.global(qos: .userInitiated).async {
                         if let hdrPath = self.applyRawHDR(dngURL: rawURL) {
-                            // Successfully processed — palitan yung JPEG path ng HDR version
                             self.pendingJpegURL = hdrPath
-                            print("✅ HDR+ (14-bit) done, JPEG replaced with HDR version")
+                            print("✅ HDR+ (14-bit adaptive) done")
                         } else {
                             print("⚠️ HDR+ failed, using original JPEG")
                         }
                         self.completeCallback()
                     }
                 } else {
-                    print("⚠️ HDR+ requires iOS 15.0+, skipping (using standard JPEG)")
+                    print("⚠️ HDR+ requires iOS 15.0+, skipping")
                     completeCallback()
                 }
             } else {
@@ -508,8 +582,6 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
         }
     }
 
-    // Extracted the completion logic sa sariling function
-    // para pwedeng tawagin async after HDR processing
     private func completeCallback() {
         DispatchQueue.main.async {
             if let error = self.captureError {
