@@ -2,15 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// Native iOS AVFoundation camera preview.
-/// Automatic na tama yung aspect ratio at pina-preserve ng videoGravity = resizeAspect.
+/// Automatic na tama yung aspect ratio via videoGravity = resizeAspect.
+/// May software zoom din para sa Halide-style RAW zoom (via Transform.scale).
 class NativeCameraPreview extends StatelessWidget {
   final String aspectRatio; // "4:3" | "16:9" | "1:1" | "3:2"
   final void Function(double x, double y)? onTap;
+  final double softwareZoom; // 1.0 = no zoom; >1.0 = center-crop zoom
 
   const NativeCameraPreview({
     super.key,
     this.aspectRatio = '4:3',
     this.onTap,
+    this.softwareZoom = 1.0,
   });
 
   double _aspectValue(String label) {
@@ -50,15 +53,31 @@ class NativeCameraPreview extends StatelessWidget {
               child: GestureDetector(
                 onTapDown: (details) {
                   if (onTap != null) {
-                    final localX = details.localPosition.dx / w;
-                    final localY = details.localPosition.dy / h;
-                    onTap!(localX.clamp(0.0, 1.0), localY.clamp(0.0, 1.0));
+                    // Note: kapag naka-software zoom, ang tap point ay adjust based sa crop
+                    final rawX = details.localPosition.dx / w;
+                    final rawY = details.localPosition.dy / h;
+
+                    // Convert visible coord to camera-native coord
+                    // Kapag zoomed 2x, ang visible area ay 50% ng full sensor sa gitna
+                    // Kaya kailangan i-map back sa full sensor coordinates
+                    final visibleFraction = 1.0 / softwareZoom;
+                    final offsetFraction = (1.0 - visibleFraction) / 2.0;
+
+                    final cameraX = offsetFraction + (rawX * visibleFraction);
+                    final cameraY = offsetFraction + (rawY * visibleFraction);
+
+                    onTap!(cameraX.clamp(0.0, 1.0), cameraY.clamp(0.0, 1.0));
                   }
                 },
-                child: const UiKitView(
-                  viewType: 'native_camera_preview',
-                  creationParams: null,
-                  creationParamsCodec: StandardMessageCodec(),
+                // Halide-style software zoom: mag-scale ng preview at i-clip
+                child: Transform.scale(
+                  scale: softwareZoom,
+                  alignment: Alignment.center,
+                  child: const UiKitView(
+                    viewType: 'native_camera_preview',
+                    creationParams: null,
+                    creationParamsCodec: StandardMessageCodec(),
+                  ),
                 ),
               ),
             ),

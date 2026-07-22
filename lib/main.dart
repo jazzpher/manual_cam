@@ -154,6 +154,18 @@ class _CameraScreenState extends State<CameraScreen> {
     }
     setState(() => _isRawEnabled = !_isRawEnabled);
     await _camera.setRAW(_isRawEnabled);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isRawEnabled
+              ? '📸 RAW mode ON — DNG + JPEG will be saved. Zoom is software-based.'
+              : '📸 RAW mode OFF — JPEG only, hardware zoom enabled.'),
+          backgroundColor: Colors.blueGrey.shade700,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   Future<void> _onPreviewTap(double x, double y) async {
@@ -174,9 +186,12 @@ class _CameraScreenState extends State<CameraScreen> {
       final paths = await _camera.capturePhoto();
       if (mounted) {
         final hasRaw = paths.containsKey('raw');
+        final zoom = paths['zoom'] ?? '1.0';
+        final zoomLabel = zoom == '1.0' ? '' : ' (${zoom}x)';
+
         final message = hasRaw
-            ? '📸 RAW + JPEG saved to Photos'
-            : '📸 JPEG saved to Photos';
+            ? '📸 RAW + JPEG saved$zoomLabel'
+            : '📸 JPEG saved$zoomLabel';
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -248,6 +263,7 @@ class _CameraScreenState extends State<CameraScreen> {
             child: NativeCameraPreview(
               aspectRatio: _aspectRatio,
               onTap: _onPreviewTap,
+              softwareZoom: _isRawEnabled ? _zoom : 1.0,
             ),
           ),
 
@@ -339,7 +355,9 @@ class _CameraScreenState extends State<CameraScreen> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                _isRawEnabled ? '$_aspectRatio · RAW+JPEG' : '$_aspectRatio · JPEG',
+                _isRawEnabled
+                    ? '$_aspectRatio · RAW+JPEG · ${_zoom.toStringAsFixed(1)}x SW'
+                    : '$_aspectRatio · JPEG · ${_zoom.toStringAsFixed(1)}x HW',
                 style: const TextStyle(
                   color: Colors.amber,
                   fontSize: 10,

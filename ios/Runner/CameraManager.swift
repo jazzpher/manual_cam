@@ -22,6 +22,10 @@ class CameraManager: NSObject {
     private var receivedPhotoCount: Int = 0
     private var captureError: Error?
 
+    // Halide-style: kapag naka-RAW mode, hardware zoom naka-lock sa 1.0x
+    // Yung "software zoom" ay stored dito at ginagamit para sa post-capture crop
+    private var softwareZoomFactor: CGFloat = 1.0
+
     func setup(completion: @escaping (Result<[String: Any], Error>) -> Void) {
         sessionQueue.async {
             do {
@@ -65,7 +69,6 @@ class CameraManager: NSObject {
     func getCapabilities() -> [String: Any] {
         guard let d = device else { return [:] }
         let rawSupported = !photoOutput.availableRawPhotoPixelFormatTypes.isEmpty
-        print("📸 Available RAW formats at setup: \(photoOutput.availableRawPhotoPixelFormatTypes)")
 
         return [
             "minISO": d.activeFormat.minISO,
@@ -165,17 +168,58 @@ class CameraManager: NSObject {
         }
     }
 
+    // === HALIDE-STYLE ZOOM ===
+    // Kapag RAW ay OFF → hardware zoom (fast, gaya ng dati)
+    // Kapag RAW ay ON → hardware naka-lock sa 1.0x, save the target sa softwareZoomFactor
     func setZoom(_ factor: CGFloat, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
         sessionQueue.async {
+            let clamped = max(1.0, min(factor, d.activeFormat.videoMaxZoomFactor))
+            self.softwareZoomFactor = clamped
+
+            if self.isRawEnabled {
+                // RAW mode: hardware naka-1.0x lang, walang change sa device
+                // Yung UI preview mag-handle ng zoom via crop
+                print("📸 RAW mode zoom: software factor = \(clamped)x (hardware locked at 1.0x)")
+                completion(true)
+                return
+            }
+
+            // JPEG mode: normal hardware zoom
             do {
                 try d.lockForConfiguration()
-                // Smooth ramp para di biglang mag-jump (may side effect ng format change)
-                let clamped = max(1.0, min(factor, d.activeFormat.videoMaxZoomFactor))
                 d.videoZoomFactor = clamped
                 d.unlockForConfiguration()
+                print("📸 JPEG mode zoom: hardware = \(clamped)x")
                 completion(true)
             } catch { completion(false) }
+        }
+    }
+
+    // Kailangan i-handle rin ang RAW toggle — kapag mag-shift ka mula JPEG (zoomed) papuntang RAW,
+    // dapat i-reset ang hardware zoom sa 1.0x
+    func setRAW(_ enabled: Bool) {
+        isRawEnabled = enabled
+        guard let d = device else { return }
+
+        sessionQueue.async {
+            do {
+                try d.lockForConfiguration()
+                if enabled {
+                    // Save current hardware zoom as software zoom, tapos reset hardware to 1.0x
+                    self.softwareZoomFactor = d.videoZoomFactor
+                    d.videoZoomFactor = 1.0
+                    print("📸 RAW toggled ON: hardware zoom reset to 1.0x, software zoom = \(self.softwareZoomFactor)x")
+                } else {
+                    // Restore hardware zoom to what software zoom was
+                    let target = max(1.0, min(self.softwareZoomFactor, d.activeFormat.videoMaxZoomFactor))
+                    d.videoZoomFactor = target
+                    print("📸 RAW toggled OFF: hardware zoom restored to \(target)x")
+                }
+                d.unlockForConfiguration()
+            } catch {
+                print("⚠️ RAW toggle zoom sync error: \(error)")
+            }
         }
     }
 
@@ -188,9 +232,15 @@ class CameraManager: NSObject {
     }
 
     func setHDR(_ enabled: Bool) { isHDREnabled = enabled }
-    func setRAW(_ enabled: Bool) { isRawEnabled = enabled }
 
-    // === CAPTURE — with RAW+zoom safety ===
+    // Expose software zoom for UI to read
+    var currentSoftwareZoom: CGFloat { softwareZoomFactor }
+    var isInRawMode: Bool { isRawEnabled }
+
+    // === CAPTURE ===
+    // JPEG-only mode: hardware zoom applied, normal capture
+    // RAW mode: hardware sa 1.0x, kunin full RAW+JPEG, tapos software-crop both files
+    //   after capture para tumugma sa softwareZoomFactor
     func capturePhoto(completion: @escaping (Result<[String: String], Error>) -> Void) {
         sessionQueue.async {
             self.pendingRawURL = nil
@@ -201,67 +251,23 @@ class CameraManager: NSObject {
 
             var settings: AVCapturePhotoSettings
 
-            // === RAW path with re-validation ===
-            if self.isRawEnabled {
-                // IMPORTANTE: Kunin ang CURRENT available raw formats
-                // (baka nagbago dahil sa zoom o format change)
-                let currentRawFormats = self.photoOutput.availableRawPhotoPixelFormatTypes
-                print("📸 Current available RAW formats (at capture time): \(currentRawFormats)")
+            if self.isRawEnabled,
+               let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first {
+                // RAW+JPEG at 1.0x hardware (Halide-style)
+                settings = AVCapturePhotoSettings(
+                    rawPixelFormatType: rawFormat,
+                    processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg]
+                )
+                self.expectedPhotoCount = 2
 
-                if let rawFormat = currentRawFormats.first {
-                    // Try to create RAW settings — wrap sa autoreleasepool para safe
-                    var rawSettings: AVCapturePhotoSettings?
-
-                    // Method na naka-defer para maiwas exception
-                    let attemptRawSettings = { () -> AVCapturePhotoSettings? in
-                        // Additional safety: check kung ready ang photoOutput
-                        guard self.photoOutput.isHighResolutionCaptureEnabled else {
-                            print("⚠️ Photo output not ready for RAW")
-                            return nil
-                        }
-
-                        let s = AVCapturePhotoSettings(
-                            rawPixelFormatType: rawFormat,
-                            processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg]
-                        )
-
-                        // Critical: RAW-safe settings
-                        if #available(iOS 13.0, *) {
-                            s.photoQualityPrioritization = .speed
-                        }
-                        s.isHighResolutionPhotoEnabled = false
-                        s.isAutoStillImageStabilizationEnabled = false
-
-                        return s
-                    }
-
-                    rawSettings = attemptRawSettings()
-
-                    if let s = rawSettings {
-                        settings = s
-                        self.expectedPhotoCount = 2
-                        print("📸 RAW+JPEG capture initialized: format=\(rawFormat), zoom=\(self.device?.videoZoomFactor ?? 1.0)")
-                    } else {
-                        // Fallback JPEG
-                        print("⚠️ RAW init failed, falling back to JPEG")
-                        settings = AVCapturePhotoSettings()
-                        self.expectedPhotoCount = 1
-                        settings.isHighResolutionPhotoEnabled = true
-                        if #available(iOS 13.0, *) {
-                            settings.photoQualityPrioritization = .balanced
-                        }
-                    }
-                } else {
-                    print("⚠️ No RAW format available (baka dahil sa zoom), JPEG only")
-                    settings = AVCapturePhotoSettings()
-                    self.expectedPhotoCount = 1
-                    settings.isHighResolutionPhotoEnabled = true
-                    if #available(iOS 13.0, *) {
-                        settings.photoQualityPrioritization = .balanced
-                    }
+                if #available(iOS 13.0, *) {
+                    settings.photoQualityPrioritization = .speed
                 }
+                settings.isHighResolutionPhotoEnabled = false
+                settings.isAutoStillImageStabilizationEnabled = false
+
+                print("📸 RAW+JPEG capture (soft zoom: \(self.softwareZoomFactor)x)")
             } else {
-                // Normal JPEG
                 settings = AVCapturePhotoSettings()
                 self.expectedPhotoCount = 1
                 settings.isHighResolutionPhotoEnabled = true
@@ -269,7 +275,7 @@ class CameraManager: NSObject {
                     settings.photoQualityPrioritization = .balanced
                 }
                 settings.isAutoStillImageStabilizationEnabled = self.isHDREnabled
-                print("📸 JPEG-only capture, zoom=\(self.device?.videoZoomFactor ?? 1.0)")
+                print("📸 JPEG capture (hardware zoom: \(self.device?.videoZoomFactor ?? 1.0)x)")
             }
 
             if let d = self.device, d.hasFlash {
@@ -296,7 +302,6 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
         let ext = isRawPhoto ? "dng" : "jpg"
 
         guard let photoData = photo.fileDataRepresentation() else {
-            print("❌ No photo data (isRaw: \(isRawPhoto))")
             captureError = NSError(domain: "Camera", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "No photo data"])
             checkAndComplete()
@@ -319,7 +324,6 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                 print("✅ JPEG saved: \(filePath) [\(photoData.count) bytes]")
             }
         } catch {
-            print("❌ Write error: \(error)")
             captureError = error
         }
 
@@ -328,7 +332,6 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
     private func checkAndComplete() {
         receivedPhotoCount += 1
-        print("📸 Received: \(receivedPhotoCount)/\(expectedPhotoCount)")
 
         if receivedPhotoCount >= expectedPhotoCount || captureError != nil {
             DispatchQueue.main.async {
@@ -338,6 +341,8 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                     var paths: [String: String] = [:]
                     if let jpeg = self.pendingJpegURL { paths["jpeg"] = jpeg }
                     if let raw = self.pendingRawURL { paths["raw"] = raw }
+                    // Pass yung software zoom factor sa Dart side para siya na ang mag-crop
+                    paths["_softwareZoom"] = String(format: "%.2f", self.softwareZoomFactor)
                     self.lastPhotoCompletion?(.success(paths))
                 }
                 self.lastPhotoCompletion = nil

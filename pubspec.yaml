@@ -2,7 +2,7 @@ name: manual_cam
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: ^3.12.2
@@ -18,6 +18,9 @@ dependencies:
 
   # Save photos to iOS Photos app
   gal: ^2.3.0
+
+  # Image cropping (para sa Halide-style RAW software zoom)
+  image: ^4.3.0
 
 dev_dependencies:
   flutter_test:
