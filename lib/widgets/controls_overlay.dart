@@ -13,6 +13,8 @@ class ControlsOverlay extends StatelessWidget {
       isRawEnabled,
       isNatural48Enabled,
       isFrameModeEnabled,
+      frameExposureAuto,
+      frameFocusAuto,
       isCapturing;
   final int uiOrientation;
   final SettingType activeDial;
@@ -47,6 +49,8 @@ class ControlsOverlay extends StatelessWidget {
     required this.isRawEnabled,
     required this.isNatural48Enabled,
     required this.isFrameModeEnabled,
+    required this.frameExposureAuto,
+    required this.frameFocusAuto,
     required this.isCapturing,
     required this.uiOrientation,
     required this.activeDial,
@@ -225,9 +229,7 @@ class ControlsOverlay extends StatelessWidget {
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 3),
             child: GestureDetector(
-              onTap: isFrameModeEnabled
-                  ? null
-                  : () => onAspectRatioChanged(ratio),
+              onTap: () => onAspectRatioChanged(ratio),
               child: _rotate(
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -273,13 +275,17 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.shutter,
             label: 'SHUTTER',
-            value: isNatural48Enabled ? 'AUTO' : shutterSpeed,
+            value: isNatural48Enabled || (isFrameModeEnabled && frameExposureAuto)
+                ? 'AUTO'
+                : shutterSpeed,
             enabled: !isNatural48Enabled,
           ),
           _pickerButton(
             type: SettingType.iso,
             label: 'ISO',
-            value: isNatural48Enabled ? 'AUTO' : iso.toInt().toString(),
+            value: isNatural48Enabled || (isFrameModeEnabled && frameExposureAuto)
+                ? 'AUTO'
+                : iso.toInt().toString(),
             enabled: !isNatural48Enabled,
           ),
           _pickerButton(
@@ -293,7 +299,9 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.focus,
             label: 'FOCUS',
-            value: isNatural48Enabled ? 'AF' : focus.toStringAsFixed(2),
+            value: isNatural48Enabled || (isFrameModeEnabled && frameFocusAuto)
+                ? 'AF'
+                : focus.toStringAsFixed(2),
             enabled: !isNatural48Enabled,
           ),
           _pickerButton(

@@ -71,7 +71,8 @@ class SceneDelegate: FlutterSceneDelegate {
                 let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
                 mgr.setFrameMode(enabled) { ok in result(ok) }
             case "captureVideoFrame":
-                mgr.captureVideoFrame { r in
+                let aspectRatio = (call.arguments as? [String: Any])?["aspectRatio"] as? String ?? "16:9"
+                mgr.captureVideoFrame(aspectRatio: aspectRatio) { r in
                     switch r {
                     case .success(let paths): result(paths)
                     case .failure(let e): result(FlutterError(
@@ -84,6 +85,8 @@ class SceneDelegate: FlutterSceneDelegate {
             case "setNatural48Mode":
                 let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
                 mgr.setNatural48Mode(enabled) { ok in result(ok) }
+            case "getCurrentCameraValues":
+                mgr.getCurrentCameraValues { values in result(values) }
             case "setFlashMode":
                 let mode = (call.arguments as? [String: Any])?["mode"] as? String ?? "off"
                 mgr.setFlashMode(mode)

@@ -60,6 +60,8 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isRawEnabled = false;
   bool _isNatural48Enabled = false;
   bool _isFrameModeEnabled = false;
+  bool _frameExposureAuto = true;
+  bool _frameFocusAuto = true;
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
@@ -145,19 +147,26 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _setISO(double v) async {
-    setState(() => _iso = v);
+    setState(() {
+      _iso = v;
+      if (_isFrameModeEnabled) _frameExposureAuto = false;
+    });
     await _camera.setISO(v);
   }
 
   Future<void> _setShutter(double sec) async {
     setState(() {
       _shutterSpeed = _formatShutter(sec);
+      if (_isFrameModeEnabled) _frameExposureAuto = false;
     });
     await _camera.setShutterSpeed(sec);
   }
 
   Future<void> _setEV(double v) async {
-    setState(() => _exposureBias = v);
+    setState(() {
+      _exposureBias = v;
+      if (_isFrameModeEnabled) _frameExposureAuto = true;
+    });
     await _camera.setExposureBias(v);
   }
 
@@ -167,7 +176,10 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _setFocus(double v) async {
-    setState(() => _focus = v);
+    setState(() {
+      _focus = v;
+      if (_isFrameModeEnabled) _frameFocusAuto = false;
+    });
     await _camera.setFocus(v);
   }
 
@@ -237,6 +249,8 @@ class _CameraScreenState extends State<CameraScreen> {
 
     setState(() {
       _isFrameModeEnabled = enable;
+      _frameExposureAuto = enable;
+      _frameFocusAuto = enable;
       _isNatural48Enabled = false;
       _isRawEnabled = false;
       _isHDREnabled = false;
@@ -246,11 +260,27 @@ class _CameraScreenState extends State<CameraScreen> {
       _activeDial = SettingType.none;
     });
 
+    if (enable) {
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      final values = await _camera.getCurrentCameraValues();
+      if (mounted && _isFrameModeEnabled) {
+        setState(() {
+          _iso = values['iso'] ?? _iso;
+          final shutter = values['shutterSeconds'];
+          if (shutter != null && shutter > 0) {
+            _shutterSpeed = _formatShutter(shutter);
+          }
+          _focus = values['focus'] ?? _focus;
+        });
+      }
+    }
+
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           enable
-              ? '4K Frame ON · 3840×2160 · Manual controls'
+              ? '4K Frame ON · Auto AE/AF · Manual override ready'
               : '4K Frame OFF · Photo mode restored',
         ),
         duration: const Duration(seconds: 2),
@@ -306,7 +336,10 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _onPreviewTap(double x, double y) async {
-    setState(() => _tapFocusPoint = Offset(x, y));
+    setState(() {
+      _tapFocusPoint = Offset(x, y);
+      if (_isFrameModeEnabled) _frameFocusAuto = true;
+    });
     await _camera.focusAtPoint(x, y);
     Future.delayed(const Duration(milliseconds: 1200), () {
       if (mounted) setState(() => _tapFocusPoint = null);
@@ -319,7 +352,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
     try {
       final paths = _isFrameModeEnabled
-          ? await _camera.captureVideoFrame()
+          ? await _camera.captureVideoFrame(_aspectRatio)
           : await _camera.capturePhoto();
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -452,6 +485,8 @@ class _CameraScreenState extends State<CameraScreen> {
             isRawEnabled: _isRawEnabled,
             isNatural48Enabled: _isNatural48Enabled,
             isFrameModeEnabled: _isFrameModeEnabled,
+            frameExposureAuto: _frameExposureAuto,
+            frameFocusAuto: _frameFocusAuto,
             isCapturing: _isCapturing,
             uiOrientation: _uiOrientation,
             activeDial: _activeDial,

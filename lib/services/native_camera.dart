@@ -115,6 +115,24 @@ class NativeCamera {
     }
   }
 
+  Future<Map<String, double>> getCurrentCameraValues() async {
+    try {
+      final result = await _channel.invokeMethod('getCurrentCameraValues');
+      if (result is! Map) return {};
+
+      final values = <String, double>{};
+      result.forEach((key, value) {
+        if (key is String && value is num) {
+          values[key] = value.toDouble();
+        }
+      });
+      return values;
+    } catch (e) {
+      print('getCurrentCameraValues error: $e');
+      return {};
+    }
+  }
+
   Future<void> setFlashMode(String mode) async {
     try {
       await _channel.invokeMethod('setFlashMode', {'mode': mode});
@@ -152,12 +170,18 @@ class NativeCamera {
   /// A RAW companion JPEG may be center-cropped on the native GPU for zoom.
   Future<Map<String, String>> capturePhoto() => _captureAndSave('capturePhoto');
 
-  Future<Map<String, String>> captureVideoFrame() =>
-      _captureAndSave('captureVideoFrame');
+  Future<Map<String, String>> captureVideoFrame(String aspectRatio) =>
+      _captureAndSave(
+        'captureVideoFrame',
+        arguments: {'aspectRatio': aspectRatio},
+      );
 
-  Future<Map<String, String>> _captureAndSave(String method) async {
+  Future<Map<String, String>> _captureAndSave(
+    String method, {
+    Map<String, dynamic>? arguments,
+  }) async {
     try {
-      final result = await _channel.invokeMethod(method);
+      final result = await _channel.invokeMethod(method, arguments);
       if (result == null) throw Exception('Capture returned null');
 
       final Map<String, String> paths = {};

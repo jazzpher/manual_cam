@@ -248,7 +248,9 @@ class CameraManager: NSObject {
                 let point = CGPoint(x: CGFloat(x), y: CGFloat(y))
                 if d.isFocusPointOfInterestSupported {
                     d.focusPointOfInterest = point
-                    d.focusMode = .autoFocus
+                    d.focusMode = self.isFrameModeEnabled
+                        ? .continuousAutoFocus
+                        : .autoFocus
                 }
                 if !self.isFrameModeEnabled && d.isExposurePointOfInterestSupported {
                     d.exposurePointOfInterest = point
@@ -307,6 +309,22 @@ class CameraManager: NSObject {
                 d.videoZoomFactor = 1.0
                 self.flashMode = .off
                 self.isHDREnabled = false
+
+                if enabled {
+                    if d.isExposureModeSupported(.continuousAutoExposure) {
+                        d.exposureMode = .continuousAutoExposure
+                    }
+                    if d.isFocusModeSupported(.continuousAutoFocus) {
+                        d.focusMode = .continuousAutoFocus
+                    }
+                    if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                        d.whiteBalanceMode = .continuousAutoWhiteBalance
+                    }
+                    if d.minExposureTargetBias <= 0 && d.maxExposureTargetBias >= 0 {
+                        d.setExposureTargetBias(0, completionHandler: nil)
+                    }
+                    d.isSubjectAreaChangeMonitoringEnabled = true
+                }
                 d.unlockForConfiguration()
 
                 if !enabled {
@@ -407,6 +425,22 @@ class CameraManager: NSObject {
         }
     }
 
+    func getCurrentCameraValues(completion: @escaping ([String: Any]) -> Void) {
+        sessionQueue.async {
+            guard let d = self.device else {
+                DispatchQueue.main.async { completion([:]) }
+                return
+            }
+
+            let values: [String: Any] = [
+                "iso": Double(d.iso),
+                "shutterSeconds": CMTimeGetSeconds(d.exposureDuration),
+                "focus": Double(d.lensPosition)
+            ]
+            DispatchQueue.main.async { completion(values) }
+        }
+    }
+
     func setFlashMode(_ mode: String) {
         switch mode {
         case "on": flashMode = .on
@@ -422,7 +456,10 @@ class CameraManager: NSObject {
 
     // MARK: - Capture
 
-    func captureVideoFrame(completion: @escaping (Result<[String: String], Error>) -> Void) {
+    func captureVideoFrame(
+        aspectRatio: String,
+        completion: @escaping (Result<[String: String], Error>) -> Void
+    ) {
         videoFrameQueue.async {
             self.videoFrameLock.lock()
             let pixelBuffer = self.latestVideoPixelBuffer
@@ -441,9 +478,24 @@ class CameraManager: NSObject {
             var image = CIImage(cvPixelBuffer: pixelBuffer)
             let orientation = self.currentPhysicalOrientation
             let isPortrait = orientation == .portrait || orientation == .portraitUpsideDown
-            let outputSize = isPortrait
-                ? CGSize(width: 2160, height: 3840)
-                : CGSize(width: 3840, height: 2160)
+
+            // Preserve native 4K source pixels. Non-16:9 ratios are center-cropped
+            // without upscaling, so their dimensions reflect real captured detail.
+            let landscapeSize: CGSize
+            switch aspectRatio {
+            case "4:3":
+                landscapeSize = CGSize(width: 2880, height: 2160)
+            case "1:1":
+                landscapeSize = CGSize(width: 2160, height: 2160)
+            case "3:2":
+                landscapeSize = CGSize(width: 3240, height: 2160)
+            default:
+                landscapeSize = CGSize(width: 3840, height: 2160)
+            }
+
+            let outputSize = isPortrait && aspectRatio != "1:1"
+                ? CGSize(width: landscapeSize.height, height: landscapeSize.width)
+                : landscapeSize
 
             let extent = image.extent
             let targetAspect = outputSize.width / outputSize.height
@@ -506,7 +558,8 @@ class CameraManager: NSObject {
                 let result = [
                     "jpeg": path,
                     "_softwareZoom": String(format: "%.2f", self.softwareZoomFactor),
-                    "mode": "4kFrame"
+                    "mode": "4kFrame",
+                    "aspectRatio": aspectRatio
                 ]
                 DispatchQueue.main.async { completion(.success(result)) }
             } catch {
