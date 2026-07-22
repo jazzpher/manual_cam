@@ -12,10 +12,6 @@ class NativeCamera {
   bool _initialized = false;
   Map<String, dynamic> _capabilities = {};
 
-  // === HDR MODE STATE ===
-  // Kapag ON, magcacapture ng RAW+JPEG tapos gagawa ng
-  // 3 virtual exposures mula sa JPEG (via digital brightening/darkening)
-  // tapos i-blend as single HDR JPEG.
   bool hdrMode = false;
 
   bool get isInitialized => _initialized;
@@ -93,7 +89,6 @@ class NativeCamera {
     catch (e) { print('setRAW error: $e'); }
   }
 
-  /// Get physical device orientation from native (via CoreMotion).
   Future<int> getCurrentOrientationCode() async {
     try {
       final result = await _channel.invokeMethod('getOrientation');
@@ -103,7 +98,6 @@ class NativeCamera {
     }
   }
 
-  /// Regular capture. Auto-applies HDR mode kapag `hdrMode` ON.
   Future<Map<String, String>> capturePhoto() async {
     try {
       final result = await _channel.invokeMethod('capturePhoto');
@@ -126,7 +120,6 @@ class NativeCamera {
 
       if (paths.isEmpty) throw Exception('No files created');
 
-      // Software zoom crop for RAW mode
       if (softwareZoom > 1.01 && paths['raw'] != null && paths['jpeg'] != null) {
         try {
           final croppedJpegPath = await _softwareZoomCrop(paths['jpeg']!, softwareZoom);
@@ -134,19 +127,17 @@ class NativeCamera {
         } catch (e) { print('⚠️ JPEG crop failed: $e'); }
       }
 
-      // === HDR MODE: Single-shot digital exposure bracketing ===
       if (hdrMode && paths['jpeg'] != null) {
         try {
-          print('🌈 Applying single-shot HDR (digital bracketing)...');
-          final hdrPath = await _applyDigitalHDR(paths['jpeg']!);
+          print('🌈 Applying luminance-only HDR (color-preserving)...');
+          final hdrPath = await _applyLuminanceHDR(paths['jpeg']!);
           if (hdrPath != null) {
             paths['jpeg'] = hdrPath;
-            print('✅ HDR applied');
+            print('✅ HDR applied (colors preserved)');
           }
         } catch (e) { print('⚠️ HDR failed: $e'); }
       }
 
-      // Save to Photos app
       try {
         final hasAccess = await Gal.hasAccess(toAlbum: true);
         if (!hasAccess) await Gal.requestAccess(toAlbum: true);
@@ -166,19 +157,19 @@ class NativeCamera {
     }
   }
 
-  /// === SINGLE-SHOT DIGITAL HDR ===
-  /// Gumagawa ng 3 virtual exposures mula sa iisang JPEG:
-  ///   - Underexposed (-2 EV): tone-mapped to recover highlights
-  ///   - Normal (0 EV): baseline
-  ///   - Overexposed (+2 EV): tone-mapped to lift shadows
-  /// Tapos i-blend gamit ang luminance-weighted masking:
-  ///   - Bright pixels → use underexposed version
-  ///   - Dark pixels → use overexposed version
-  ///   - Mid pixels → mostly normal
+  /// === LUMINANCE-ONLY HDR ===
+  /// Process only the luminance channel (Y in YCbCr) para hindi mag-alter yung colors.
+  /// Yung original hue at saturation ay maintained perfectly.
   ///
-  /// Advantage: hindi kailangan ng multiple shots, walang ghosting/blur risk,
-  /// handhold-friendly.
-  Future<String?> _applyDigitalHDR(String jpegPath) async {
+  /// Process:
+  /// 1. Convert RGB → YCbCr (Y=brightness, Cb=blue-diff, Cr=red-diff)
+  /// 2. Create 3 virtual Y-channel exposures (under, normal, over)
+  /// 3. Blend Y using luminance-weighted masking
+  /// 4. Convert back YCbCr → RGB using NEW Y + ORIGINAL Cb/Cr
+  ///
+  /// Result: brightness ay ma-e-enhance sa dark/bright areas,
+  /// pero yung colors (skin tone, sky blue, atbp.) ay hindi magbabago.
+  Future<String?> _applyLuminanceHDR(String jpegPath) async {
     try {
       final file = File(jpegPath);
       final bytes = await file.readAsBytes();
@@ -188,28 +179,16 @@ class NativeCamera {
       final w = image.width;
       final h = image.height;
 
-      // === Pre-compute exposure lookup tables (LUTs) ===
-      // Under: darker (0.5x brightness) with gamma to preserve highlights detail
+      // Pre-compute exposure LUTs for Y channel only
       final underLUT = List<int>.generate(256, (v) {
         final n = v / 255.0;
-        // Reduce by ~2 EV = 4x darker sa linear (but nonlinear para may detail sa highlights)
-        final darkened = math.pow(n, 2.0).toDouble() * 255.0;
-        return darkened.round().clamp(0, 255);
+        return (math.pow(n, 2.0).toDouble() * 255.0).round().clamp(0, 255);
       });
 
-      // Over: brighter (2x) with inverse gamma to preserve shadow detail
       final overLUT = List<int>.generate(256, (v) {
         final n = v / 255.0;
-        // Boost by ~2 EV = 4x brighter sa linear, tapos compress na hindi mag-blowout
-        final brightened = math.pow(n, 0.5).toDouble() * 255.0;
-        return brightened.round().clamp(0, 255);
+        return (math.pow(n, 0.5).toDouble() * 255.0).round().clamp(0, 255);
       });
-
-      // === Blend using luminance-weighted masking ===
-      // Ito ang core ng "HDR merge":
-      //   - Bright areas (>200): use UNDER (para may detail yung sky, atbp.)
-      //   - Dark areas (<55): use OVER (para makita yung shadows)
-      //   - Midtones (55-200): mostly NORMAL
 
       for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
@@ -218,48 +197,45 @@ class NativeCamera {
           final g = pixel.g.toInt().clamp(0, 255);
           final b = pixel.b.toInt().clamp(0, 255);
 
-          // Virtual exposures
-          final ur = underLUT[r], ug = underLUT[g], ub = underLUT[b];
-          final or_ = overLUT[r], og = overLUT[g], ob = overLUT[b];
-          // Normal = r, g, b as-is
+          // === RGB → YCbCr conversion (BT.601 standard) ===
+          final origY = (0.299 * r + 0.587 * g + 0.114 * b);
+          final cb = 128 + (-0.168736 * r - 0.331264 * g + 0.5 * b);
+          final cr = 128 + (0.5 * r - 0.418688 * g - 0.081312 * b);
 
-          // Luminance of original (for masking weights)
-          final lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          // === Y-channel exposure blending ===
+          final origYInt = origY.round().clamp(0, 255);
+          final underY = underLUT[origYInt].toDouble();
+          final overY = overLUT[origYInt].toDouble();
 
+          // Weight computation based on original Y (luminance)
           double wUnder, wNormal, wOver;
 
-          if (lum > 200) {
-            // Very bright — favor UNDER (recover highlights)
-            final t = ((lum - 200) / 55).clamp(0.0, 1.0);
+          if (origY > 200) {
+            final t = ((origY - 200) / 55).clamp(0.0, 1.0);
             wUnder = 0.5 + 0.4 * t;
             wNormal = 0.4 - 0.3 * t;
             wOver = 0.1 - 0.1 * t;
-          } else if (lum > 140) {
-            // Highlights — mix under+normal
-            final t = ((lum - 140) / 60).clamp(0.0, 1.0);
+          } else if (origY > 140) {
+            final t = ((origY - 140) / 60).clamp(0.0, 1.0);
             wUnder = 0.2 + 0.3 * t;
             wNormal = 0.7 - 0.2 * t;
             wOver = 0.1 - 0.1 * t;
-          } else if (lum < 55) {
-            // Very dark — favor OVER (lift shadows)
-            final t = ((55 - lum) / 55).clamp(0.0, 1.0);
+          } else if (origY < 55) {
+            final t = ((55 - origY) / 55).clamp(0.0, 1.0);
             wOver = 0.5 + 0.4 * t;
             wNormal = 0.4 - 0.3 * t;
             wUnder = 0.1 - 0.1 * t;
-          } else if (lum < 115) {
-            // Shadows — mix normal+over
-            final t = ((115 - lum) / 60).clamp(0.0, 1.0);
+          } else if (origY < 115) {
+            final t = ((115 - origY) / 60).clamp(0.0, 1.0);
             wOver = 0.2 + 0.3 * t;
             wNormal = 0.7 - 0.2 * t;
             wUnder = 0.1 - 0.1 * t;
           } else {
-            // Midtones — mostly normal
             wUnder = 0.15;
             wNormal = 0.7;
             wOver = 0.15;
           }
 
-          // Normalize weights
           wUnder = wUnder.clamp(0.0, 1.0);
           wNormal = wNormal.clamp(0.0, 1.0);
           wOver = wOver.clamp(0.0, 1.0);
@@ -268,19 +244,22 @@ class NativeCamera {
           wNormal /= total;
           wOver /= total;
 
-          // Blend
-          final finalR = (ur * wUnder + r * wNormal + or_ * wOver).round().clamp(0, 255);
-          final finalG = (ug * wUnder + g * wNormal + og * wOver).round().clamp(0, 255);
-          final finalB = (ub * wUnder + b * wNormal + ob * wOver).round().clamp(0, 255);
+          // Blend Y only
+          final newY = (underY * wUnder + origY * wNormal + overY * wOver);
 
-          image.setPixelRgb(x, y, finalR, finalG, finalB);
+          // === YCbCr → RGB conversion (using NEW Y + ORIGINAL Cb/Cr) ===
+          // Ito ang key: yung Cb/Cr (color info) ay hindi natin ginalaw.
+          // Kaya same colors, iba lang yung brightness.
+          final newR = (newY + 1.402 * (cr - 128)).round().clamp(0, 255);
+          final newG = (newY - 0.344136 * (cb - 128) - 0.714136 * (cr - 128)).round().clamp(0, 255);
+          final newB = (newY + 1.772 * (cb - 128)).round().clamp(0, 255);
+
+          image.setPixelRgb(x, y, newR, newG, newB);
         }
       }
 
-      // Konting contrast + saturation boost para pop
-      final adjusted = img.adjustColor(image, contrast: 1.05, saturation: 1.08);
-
-      final jpg = img.encodeJpg(adjusted, quality: 92);
+      // NO saturation or contrast boost — pure luminance processing lang
+      final jpg = img.encodeJpg(image, quality: 92);
       final newPath = jpegPath.replaceFirst('.jpg', '_hdr.jpg');
       await File(newPath).writeAsBytes(jpg);
       return newPath;
