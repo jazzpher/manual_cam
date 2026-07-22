@@ -15,8 +15,19 @@ class CameraManager: NSObject {
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
     private let videoFrameQueue = DispatchQueue(label: "camera.video.frame.queue")
+    private let frameProcessingQueue = DispatchQueue(
+        label: "camera.frame.processing.queue",
+        qos: .userInitiated
+    )
     private let videoFrameLock = NSLock()
     private var latestVideoPixelBuffer: CVPixelBuffer?
+
+    private var pendingFrameCaptureID: UUID?
+    private var pendingFrameAspectRatio = "16:9"
+    private var pendingFrameBuffers: [CVPixelBuffer] = []
+    private var pendingFrameCompletion: ((Result<[String: String], Error>) -> Void)?
+    private var pendingFrameWaitCount = 0
+    private let frameBurstCount = 5
     private var isHDREnabled = false
     private var isRawEnabled = false
     private var isNatural48Enabled = false
@@ -461,112 +472,245 @@ class CameraManager: NSObject {
         completion: @escaping (Result<[String: String], Error>) -> Void
     ) {
         videoFrameQueue.async {
-            self.videoFrameLock.lock()
-            let pixelBuffer = self.latestVideoPixelBuffer
-            self.videoFrameLock.unlock()
-
-            guard self.isFrameModeEnabled, let pixelBuffer = pixelBuffer else {
+            guard self.isFrameModeEnabled else {
                 let error = NSError(
                     domain: "Camera",
                     code: 20,
-                    userInfo: [NSLocalizedDescriptionKey: "4K video frame is not ready"]
+                    userInfo: [NSLocalizedDescriptionKey: "4K Frame mode is not enabled"]
                 )
                 DispatchQueue.main.async { completion(.failure(error)) }
                 return
             }
 
-            var image = CIImage(cvPixelBuffer: pixelBuffer)
-            let orientation = self.currentPhysicalOrientation
-            let isPortrait = orientation == .portrait || orientation == .portraitUpsideDown
-
-            // Preserve native 4K source pixels. Non-16:9 ratios are center-cropped
-            // without upscaling, so their dimensions reflect real captured detail.
-            let landscapeSize: CGSize
-            switch aspectRatio {
-            case "4:3":
-                landscapeSize = CGSize(width: 2880, height: 2160)
-            case "1:1":
-                landscapeSize = CGSize(width: 2160, height: 2160)
-            case "3:2":
-                landscapeSize = CGSize(width: 3240, height: 2160)
-            default:
-                landscapeSize = CGSize(width: 3840, height: 2160)
-            }
-
-            let outputSize = isPortrait && aspectRatio != "1:1"
-                ? CGSize(width: landscapeSize.height, height: landscapeSize.width)
-                : landscapeSize
-
-            let extent = image.extent
-            let targetAspect = outputSize.width / outputSize.height
-            let sourceAspect = extent.width / extent.height
-            var cropRect = extent
-
-            if sourceAspect > targetAspect {
-                let width = extent.height * targetAspect
-                cropRect = CGRect(
-                    x: extent.midX - width / 2.0,
-                    y: extent.minY,
-                    width: width,
-                    height: extent.height
-                )
-            } else if sourceAspect < targetAspect {
-                let height = extent.width / targetAspect
-                cropRect = CGRect(
-                    x: extent.minX,
-                    y: extent.midY - height / 2.0,
-                    width: extent.width,
-                    height: height
-                )
-            }
-
-            image = image
-                .cropped(to: cropRect)
-                .transformed(by: CGAffineTransform(
-                    translationX: -cropRect.minX,
-                    y: -cropRect.minY
-                ))
-                .transformed(by: CGAffineTransform(
-                    scaleX: outputSize.width / cropRect.width,
-                    y: outputSize.height / cropRect.height
-                ))
-
-            let outputRect = CGRect(origin: .zero, size: outputSize)
-            let p3 = CGColorSpace(name: CGColorSpace.displayP3)!
-            guard let cgImage = self.ciContext.createCGImage(
-                image,
-                from: outputRect,
-                format: .RGBA8,
-                colorSpace: p3
-            ), let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.95) else {
+            guard self.pendingFrameCaptureID == nil else {
                 let error = NSError(
                     domain: "Camera",
-                    code: 21,
-                    userInfo: [NSLocalizedDescriptionKey: "Unable to render 4K video frame"]
+                    code: 22,
+                    userInfo: [NSLocalizedDescriptionKey: "A frame capture is already running"]
                 )
                 DispatchQueue.main.async { completion(.failure(error)) }
                 return
             }
 
-            let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-            let filename = "manualcam_\(timestamp)_4kframe.jpg"
-            let path = (NSTemporaryDirectory() as NSString)
-                .appendingPathComponent(filename)
+            let captureID = UUID()
+            self.pendingFrameCaptureID = captureID
+            self.pendingFrameAspectRatio = aspectRatio
+            self.pendingFrameBuffers.removeAll(keepingCapacity: true)
+            self.pendingFrameCompletion = completion
+            self.pendingFrameWaitCount = 0
 
-            do {
-                try jpegData.write(to: URL(fileURLWithPath: path))
-                let result = [
-                    "jpeg": path,
-                    "_softwareZoom": String(format: "%.2f", self.softwareZoomFactor),
-                    "mode": "4kFrame",
-                    "aspectRatio": aspectRatio
-                ]
-                DispatchQueue.main.async { completion(.success(result)) }
-            } catch {
-                DispatchQueue.main.async { completion(.failure(error)) }
+            // Do not leave the shutter waiting forever if the video pipeline stalls.
+            self.videoFrameQueue.asyncAfter(deadline: .now() + 2.0) {
+                guard self.pendingFrameCaptureID == captureID else { return }
+
+                if let latest = self.latestVideoPixelBuffer {
+                    self.pendingFrameBuffers.append(latest)
+                    self.finishPendingFrameCapture()
+                } else {
+                    let timeoutError = NSError(
+                        domain: "Camera",
+                        code: 23,
+                        userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for a video frame"]
+                    )
+                    let callback = self.pendingFrameCompletion
+                    self.clearPendingFrameCapture()
+                    DispatchQueue.main.async { callback?(.failure(timeoutError)) }
+                }
             }
         }
     }
+
+    private func finishPendingFrameCapture() {
+        guard pendingFrameCaptureID != nil,
+              !pendingFrameBuffers.isEmpty,
+              let completion = pendingFrameCompletion else { return }
+
+        let buffers = pendingFrameBuffers
+        let aspectRatio = pendingFrameAspectRatio
+        clearPendingFrameCapture()
+
+        frameProcessingQueue.async {
+            var sharpest = buffers[0]
+            var bestScore = self.sharpnessScore(sharpest)
+            for buffer in buffers.dropFirst() {
+                let score = self.sharpnessScore(buffer)
+                if score > bestScore {
+                    bestScore = score
+                    sharpest = buffer
+                }
+            }
+            self.renderVideoFrame(
+                sharpest,
+                aspectRatio: aspectRatio,
+                completion: completion
+            )
+        }
+    }
+
+    private func clearPendingFrameCapture() {
+        pendingFrameCaptureID = nil
+        pendingFrameAspectRatio = "16:9"
+        pendingFrameBuffers.removeAll(keepingCapacity: true)
+        pendingFrameCompletion = nil
+        pendingFrameWaitCount = 0
+    }
+
+    private func sharpnessScore(_ pixelBuffer: CVPixelBuffer) -> Float {
+        let source = CIImage(cvPixelBuffer: pixelBuffer)
+        let longestSide = max(source.extent.width, source.extent.height)
+        guard longestSide > 0 else { return 0 }
+
+        let scale = min(1.0, 256.0 / longestSide)
+        let smallImage = source.transformed(
+            by: CGAffineTransform(scaleX: scale, y: scale)
+        )
+
+        guard let edges = CIFilter(
+            name: "CIEdges",
+            parameters: [
+                kCIInputImageKey: smallImage,
+                kCIInputIntensityKey: 1.0
+            ]
+        )?.outputImage,
+        let average = CIFilter(
+            name: "CIAreaAverage",
+            parameters: [
+                kCIInputImageKey: edges,
+                kCIInputExtentKey: CIVector(cgRect: edges.extent)
+            ]
+        )?.outputImage else {
+            return 0
+        }
+
+        var pixel = [UInt8](repeating: 0, count: 4)
+        ciContext.render(
+            average,
+            toBitmap: &pixel,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+
+        return Float(pixel[0]) + Float(pixel[1]) + Float(pixel[2])
+    }
+
+    private func renderVideoFrame(
+        _ pixelBuffer: CVPixelBuffer,
+        aspectRatio: String,
+        completion: @escaping (Result<[String: String], Error>) -> Void
+    ) {
+        var image = CIImage(cvPixelBuffer: pixelBuffer)
+        let orientation = currentPhysicalOrientation
+        let isPortrait = orientation == .portrait || orientation == .portraitUpsideDown
+
+        let desiredLandscapeSize: CGSize
+        switch aspectRatio {
+        case "4:3":
+            desiredLandscapeSize = CGSize(width: 2880, height: 2160)
+        case "1:1":
+            desiredLandscapeSize = CGSize(width: 2160, height: 2160)
+        case "3:2":
+            desiredLandscapeSize = CGSize(width: 3240, height: 2160)
+        default:
+            desiredLandscapeSize = CGSize(width: 3840, height: 2160)
+        }
+
+        let desiredOutputSize = isPortrait && aspectRatio != "1:1"
+            ? CGSize(
+                width: desiredLandscapeSize.height,
+                height: desiredLandscapeSize.width
+            )
+            : desiredLandscapeSize
+
+        let extent = image.extent
+        let targetAspect = desiredOutputSize.width / desiredOutputSize.height
+        let sourceAspect = extent.width / extent.height
+        var cropRect = extent
+
+        if sourceAspect > targetAspect {
+            let width = extent.height * targetAspect
+            cropRect = CGRect(
+                x: extent.midX - width / 2.0,
+                y: extent.minY,
+                width: width,
+                height: extent.height
+            )
+        } else if sourceAspect < targetAspect {
+            let height = extent.width / targetAspect
+            cropRect = CGRect(
+                x: extent.minX,
+                y: extent.midY - height / 2.0,
+                width: extent.width,
+                height: height
+            )
+        }
+
+        // Never enlarge a lower-resolution video buffer. This prevents a 1080p
+        // source from being mislabeled and softened by upscaling it to 4K.
+        let desiredScale = min(
+            desiredOutputSize.width / cropRect.width,
+            desiredOutputSize.height / cropRect.height
+        )
+        let renderScale = min(1.0, desiredScale)
+        let outputSize = CGSize(
+            width: floor(cropRect.width * renderScale),
+            height: floor(cropRect.height * renderScale)
+        )
+
+        image = image
+            .cropped(to: cropRect)
+            .transformed(by: CGAffineTransform(
+                translationX: -cropRect.minX,
+                y: -cropRect.minY
+            ))
+            .transformed(by: CGAffineTransform(
+                scaleX: renderScale,
+                y: renderScale
+            ))
+
+        let outputRect = CGRect(origin: .zero, size: outputSize)
+        let p3 = CGColorSpace(name: CGColorSpace.displayP3)!
+        guard let cgImage = ciContext.createCGImage(
+            image,
+            from: outputRect,
+            format: .RGBA8,
+            colorSpace: p3
+        ), let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.95) else {
+            let error = NSError(
+                domain: "Camera",
+                code: 21,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to render video frame"]
+            )
+            DispatchQueue.main.async { completion(.failure(error)) }
+            return
+        }
+
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let filename = "manualcam_\(timestamp)_frame.jpg"
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent(filename)
+
+        do {
+            try jpegData.write(to: URL(fileURLWithPath: path))
+            let result = [
+                "jpeg": path,
+                "_softwareZoom": String(format: "%.2f", softwareZoomFactor),
+                "mode": "sharpFrame",
+                "aspectRatio": aspectRatio,
+                "width": String(Int(outputSize.width)),
+                "height": String(Int(outputSize.height)),
+                "burstFrames": String(buffersCountForMetadata)
+            ]
+            DispatchQueue.main.async { completion(.success(result)) }
+        } catch {
+            DispatchQueue.main.async { completion(.failure(error)) }
+        }
+    }
+
+    // Kept as a computed value so capture metadata remains explicit without
+    // retaining the complete burst beyond frame selection.
+    private var buffersCountForMetadata: Int { frameBurstCount }
 
     func capturePhoto(completion: @escaping (Result<[String: String], Error>) -> Void) {
         sessionQueue.async {
@@ -691,6 +835,20 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         videoFrameLock.lock()
         latestVideoPixelBuffer = pixelBuffer
         videoFrameLock.unlock()
+
+        guard pendingFrameCaptureID != nil else { return }
+
+        let isAdjusting = (device?.isAdjustingFocus ?? false) ||
+            (device?.isAdjustingExposure ?? false)
+        if isAdjusting && pendingFrameWaitCount < 15 {
+            pendingFrameWaitCount += 1
+            return
+        }
+
+        pendingFrameBuffers.append(pixelBuffer)
+        if pendingFrameBuffers.count >= frameBurstCount {
+            finishPendingFrameCapture()
+        }
     }
 }
 
