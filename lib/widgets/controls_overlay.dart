@@ -5,11 +5,11 @@ class ControlsOverlay extends StatelessWidget {
   final String shutterSpeed, aspectRatio, flashMode;
   final List<double> shutterSpeedValues;
   final List<String> aspectRatios;
-  final bool isHDREnabled, isRawEnabled, isHDRPlusEnabled, isCapturing;
+  final bool isHDREnabled, isRawEnabled, isCineEnabled, isCapturing;
   final bool showISOSlider, showEVSlider, showShutterPicker, showFocusSlider, showZoomSlider;
   final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
-  final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleHDRPlus;
+  final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleCine;
   final VoidCallback onToggleISOSlider, onToggleEVSlider, onToggleShutterPicker, onToggleFocusSlider, onToggleZoomSlider;
   final VoidCallback onCloseAllPopups;
 
@@ -29,7 +29,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.flashMode,
     required this.isHDREnabled,
     required this.isRawEnabled,
-    required this.isHDRPlusEnabled,
+    required this.isCineEnabled,
     required this.isCapturing,
     required this.onISOChanged,
     required this.onShutterSpeedChanged,
@@ -41,7 +41,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onCapture,
     required this.onToggleHDR,
     required this.onToggleRAW,
-    required this.onToggleHDRPlus,
+    required this.onToggleCine,
     required this.showISOSlider,
     required this.onToggleISOSlider,
     required this.showEVSlider,
@@ -122,12 +122,13 @@ class ControlsOverlay extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          // === BAGONG HDR+ PILL ===
+          // === BAGONG CINE PILL (kulay orange kapag ON) ===
           GestureDetector(
-            onTap: onToggleHDRPlus,
+            onTap: onToggleCine,
             child: _pill(
-              label: 'HDR+',
-              color: isHDRPlusEnabled ? Colors.cyanAccent : Colors.grey,
+              icon: Icons.movie_filter,
+              label: 'CINE',
+              color: isCineEnabled ? Colors.deepOrangeAccent : Colors.grey,
             ),
           ),
           const SizedBox(width: 6),
@@ -264,7 +265,7 @@ class ControlsOverlay extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: isHDRPlusEnabled ? Colors.cyanAccent : Colors.white,
+                  color: isCineEnabled ? Colors.deepOrangeAccent : Colors.white,
                   width: 4,
                 ),
                 color: isCapturing ? Colors.white38 : Colors.white,
@@ -280,7 +281,7 @@ class ControlsOverlay extends StatelessWidget {
                         height: 63,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isHDRPlusEnabled ? Colors.cyanAccent : Colors.white,
+                          color: isCineEnabled ? Colors.deepOrangeAccent : Colors.white,
                         )),
               ),
             ),

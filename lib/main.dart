@@ -50,7 +50,7 @@ class _CameraScreenState extends State<CameraScreen> {
   double _focus = 0.5;
   bool _isHDREnabled = false;
   bool _isRawEnabled = false;
-  bool _isHDRPlusEnabled = false; // BAGO: HDR+ mode (auto-blend)
+  bool _isCineEnabled = false; // === BAGO: Cinematic mode ===
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
@@ -153,34 +153,24 @@ class _CameraScreenState extends State<CameraScreen> {
       }
       return;
     }
-    // Kapag mag-on ng RAW at naka-HDR+, disable HDR+ (incompatible)
-    setState(() {
-      _isRawEnabled = !_isRawEnabled;
-      if (_isRawEnabled) _isHDRPlusEnabled = false;
-    });
+    setState(() => _isRawEnabled = !_isRawEnabled);
     await _camera.setRAW(_isRawEnabled);
   }
 
-  // === BAGONG TOGGLE FOR HDR+ ===
-  Future<void> _toggleHDRPlus() async {
-    // Kapag mag-on ng HDR+ at naka-RAW, disable RAW (incompatible)
+  // === BAGONG TOGGLE: CINEMATIC MODE ===
+  void _toggleCine() {
     setState(() {
-      _isHDRPlusEnabled = !_isHDRPlusEnabled;
-      if (_isHDRPlusEnabled) {
-        _isRawEnabled = false;
-      }
+      _isCineEnabled = !_isCineEnabled;
+      _camera.cinematicMode = _isCineEnabled;
     });
-    if (!_isRawEnabled) {
-      await _camera.setRAW(false);
-    }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_isHDRPlusEnabled
-              ? '📸 HDR+ ON — 3-shot exposure blend for balanced dynamic range'
-              : '📸 HDR+ OFF — normal capture'),
-          backgroundColor: Colors.blueGrey.shade700,
+          content: Text(_isCineEnabled
+              ? '🎬 CINE mode ON — teal-orange grade + 2.35:1 letterbox'
+              : '🎬 CINE mode OFF — normal capture'),
+          backgroundColor: Colors.deepOrange.shade700,
           duration: const Duration(seconds: 3),
         ),
       );
@@ -188,9 +178,7 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _onPreviewTap(double x, double y) async {
-    setState(() {
-      _tapFocusPoint = Offset(x, y);
-    });
+    setState(() => _tapFocusPoint = Offset(x, y));
     await _camera.focusAtPoint(x, y);
     Future.delayed(const Duration(milliseconds: 1200), () {
       if (mounted) setState(() => _tapFocusPoint = null);
@@ -201,51 +189,38 @@ class _CameraScreenState extends State<CameraScreen> {
     if (_isCapturing) return;
     setState(() => _isCapturing = true);
 
-    // Show progress message for HDR+ (kasi mas matagal)
-    if (_isHDRPlusEnabled && mounted) {
+    // Cinematic mode ay medyo matagal (~1-2 sec para sa processing)
+    if (_isCineEnabled && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⏳ Capturing 3 exposures & blending...'),
-          backgroundColor: Colors.blueGrey,
-          duration: Duration(seconds: 3),
+          content: Text('🎬 Applying cinematic grade...'),
+          backgroundColor: Colors.deepOrange,
+          duration: Duration(seconds: 2),
         ),
       );
     }
 
     try {
-      if (_isHDRPlusEnabled) {
-        // === HDR+ CAPTURE ===
-        final path = await _camera.captureHDRBlend();
-        if (mounted) {
-          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('📸 HDR+ blended photo saved to Photos!'),
-              backgroundColor: Colors.green.shade700,
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
-      } else {
-        // === REGULAR CAPTURE (JPEG or RAW+JPEG) ===
-        final paths = await _camera.capturePhoto();
-        if (mounted) {
-          final hasRaw = paths.containsKey('raw');
-          final zoom = paths['zoom'] ?? '1.0';
-          final zoomLabel = zoom == '1.0' ? '' : ' (${zoom}x)';
+      final paths = await _camera.capturePhoto();
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
-          final message = hasRaw
-              ? '📸 RAW + JPEG saved$zoomLabel'
-              : '📸 JPEG saved$zoomLabel';
+        final hasRaw = paths.containsKey('raw');
+        final zoom = paths['zoom'] ?? '1.0';
+        final zoomLabel = zoom == '1.0' ? '' : ' (${zoom}x)';
+        final cineLabel = _isCineEnabled ? ' 🎬' : '';
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(message),
-              backgroundColor: Colors.green.shade700,
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
+        final message = hasRaw
+            ? '📸 RAW + JPEG saved$zoomLabel$cineLabel'
+            : '📸 JPEG saved$zoomLabel$cineLabel';
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -274,9 +249,11 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   String _modeLabel() {
-    if (_isHDRPlusEnabled) return 'HDR+';
-    if (_isRawEnabled) return 'RAW+JPEG';
-    return 'JPEG';
+    final parts = <String>[];
+    if (_isRawEnabled) parts.add('RAW+JPEG');
+    else parts.add('JPEG');
+    if (_isCineEnabled) parts.add('CINE');
+    return parts.join(' · ');
   }
 
   @override
@@ -321,6 +298,31 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
 
+          // === CINEMATIC LETTERBOX OVERLAY sa preview ===
+          // Kapag naka-CINE mode, mag-show ng 2.35:1 letterbox preview bars
+          // para makita ng user kung anong porma ng final capture
+          if (_isCineEnabled)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final w = constraints.maxWidth;
+                    final h = constraints.maxHeight;
+                    // Sa 2.35:1, ang visible height = w / 2.35
+                    final visibleH = w / 2.35;
+                    final barH = ((h - visibleH) / 2).clamp(0.0, h / 2);
+                    return Column(
+                      children: [
+                        Container(width: w, height: barH, color: Colors.black.withOpacity(0.85)),
+                        Expanded(child: Container()),
+                        Container(width: w, height: barH, color: Colors.black.withOpacity(0.85)),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+
           if (_tapFocusPoint != null)
             _buildFocusReticle(_tapFocusPoint!),
 
@@ -355,7 +357,7 @@ class _CameraScreenState extends State<CameraScreen> {
             flashMode: _flashMode,
             isHDREnabled: _isHDREnabled,
             isRawEnabled: _isRawEnabled,
-            isHDRPlusEnabled: _isHDRPlusEnabled,
+            isCineEnabled: _isCineEnabled,
             isCapturing: _isCapturing,
             onISOChanged: _setISO,
             onShutterSpeedChanged: _setShutter,
@@ -367,7 +369,7 @@ class _CameraScreenState extends State<CameraScreen> {
             onCapture: _capturePhoto,
             onToggleHDR: _toggleHDR,
             onToggleRAW: _toggleRAW,
-            onToggleHDRPlus: _toggleHDRPlus,
+            onToggleCine: _toggleCine,
             onCloseAllPopups: _closeAllPopups,
             showISOSlider: _showISOSlider,
             onToggleISOSlider: () {

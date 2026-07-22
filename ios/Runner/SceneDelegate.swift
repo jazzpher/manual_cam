@@ -90,19 +90,6 @@ class SceneDelegate: FlutterSceneDelegate {
                                             details: nil))
                     }
                 }
-            case "captureBracket":
-                // === BAGONG HANDLER FOR HDR+ MODE ===
-                mgr.captureBracket { r in
-                    switch r {
-                    case .success(let paths):
-                        // Return array of paths as list
-                        result(paths)
-                    case .failure(let e):
-                        result(FlutterError(code: "BRACKET_FAIL",
-                                            message: e.localizedDescription,
-                                            details: nil))
-                    }
-                }
             default:
                 result(FlutterMethodNotImplemented)
             }
