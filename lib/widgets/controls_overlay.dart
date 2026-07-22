@@ -9,13 +9,17 @@ class ControlsOverlay extends StatelessWidget {
   final String shutterSpeed, aspectRatio, flashMode;
   final List<double> shutterSpeedValues;
   final List<String> aspectRatios;
-  final bool isHDREnabled, isRawEnabled, isHdrPlusEnabled, isCapturing;
+  final bool isHDREnabled, isRawEnabled, isCapturing;
   final int uiOrientation;
   final SettingType activeDial;
-  final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
+  final Function(double) onISOChanged,
+      onShutterSpeedChanged,
+      onExposureBiasChanged,
+      onZoomChanged,
+      onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
   final Function(SettingType) onSelectDial;
-  final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleHdrPlus;
+  final VoidCallback onCapture, onToggleHDR, onToggleRAW;
 
   const ControlsOverlay({
     super.key,
@@ -33,7 +37,6 @@ class ControlsOverlay extends StatelessWidget {
     required this.flashMode,
     required this.isHDREnabled,
     required this.isRawEnabled,
-    required this.isHdrPlusEnabled,
     required this.isCapturing,
     required this.uiOrientation,
     required this.activeDial,
@@ -48,15 +51,18 @@ class ControlsOverlay extends StatelessWidget {
     required this.onCapture,
     required this.onToggleHDR,
     required this.onToggleRAW,
-    required this.onToggleHdrPlus,
   });
 
   double get _rotationAngle {
     switch (uiOrientation) {
-      case 1: return -math.pi / 2;
-      case 2: return math.pi;
-      case 3: return math.pi / 2;
-      default: return 0;
+      case 1:
+        return -math.pi / 2;
+      case 2:
+        return math.pi;
+      case 3:
+        return math.pi / 2;
+      default:
+        return 0;
     }
   }
 
@@ -79,8 +85,7 @@ class ControlsOverlay extends StatelessWidget {
           _buildAspectRatioSelector(),
           const SizedBox(height: 8),
           // === RULER DIAL (lumalabas kapag may active setting) ===
-          if (activeDial != SettingType.none)
-            _buildRulerDial(),
+          if (activeDial != SettingType.none) _buildRulerDial(),
           const SizedBox(height: 6),
           _buildSettingPicker(),
           const SizedBox(height: 12),
@@ -98,43 +103,44 @@ class ControlsOverlay extends StatelessWidget {
         children: [
           GestureDetector(
             onTap: () {
-              final next = flashMode == 'off' ? 'on' : flashMode == 'on' ? 'auto' : 'off';
+              final next = flashMode == 'off'
+                  ? 'on'
+                  : flashMode == 'on'
+                  ? 'auto'
+                  : 'off';
               onFlashModeChanged(next);
             },
-            child: _rotate(_pill(
-              icon: flashMode == 'off'
-                  ? Icons.flash_off
-                  : flashMode == 'on'
-                      ? Icons.flash_on
-                      : Icons.flash_auto,
-              label: flashMode.toUpperCase(),
-              color: flashMode == 'off' ? Colors.grey : Colors.amber,
-            )),
+            child: _rotate(
+              _pill(
+                icon: flashMode == 'off'
+                    ? Icons.flash_off
+                    : flashMode == 'on'
+                    ? Icons.flash_on
+                    : Icons.flash_auto,
+                label: flashMode.toUpperCase(),
+                color: flashMode == 'off' ? Colors.grey : Colors.amber,
+              ),
+            ),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleHDR,
-            child: _rotate(_pill(
-              label: 'HDR',
-              color: isHDREnabled ? Colors.amber : Colors.grey,
-            )),
-          ),
-          const SizedBox(width: 6),
-          GestureDetector(
-            onTap: onToggleHdrPlus,
-            child: _rotate(_pill(
-              icon: Icons.hdr_on,
-              label: 'HDR+',
-              color: isHdrPlusEnabled ? Colors.greenAccent : Colors.grey,
-            )),
+            child: _rotate(
+              _pill(
+                label: 'HDR',
+                color: isHDREnabled ? Colors.amber : Colors.grey,
+              ),
+            ),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleRAW,
-            child: _rotate(_pill(
-              label: 'RAW',
-              color: isRawEnabled ? Colors.amber : Colors.grey,
-            )),
+            child: _rotate(
+              _pill(
+                label: 'RAW',
+                color: isRawEnabled ? Colors.amber : Colors.grey,
+              ),
+            ),
           ),
           const Spacer(),
           _rotate(_pill(label: 'MANUAL', color: Colors.amber)),
@@ -158,7 +164,14 @@ class ControlsOverlay extends StatelessWidget {
             Icon(icon, color: color, size: 12),
             const SizedBox(width: 3),
           ],
-          Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
@@ -175,20 +188,34 @@ class ControlsOverlay extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 3),
             child: GestureDetector(
               onTap: () => onAspectRatioChanged(ratio),
-              child: _rotate(Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isSelected ? Colors.amber.withOpacity(0.3) : Colors.black54,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: isSelected ? Colors.amber : Colors.white24, width: 1),
-                ),
-                child: Text(ratio,
+              child: _rotate(
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.amber.withOpacity(0.3)
+                        : Colors.black54,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: isSelected ? Colors.amber : Colors.white24,
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    ratio,
                     style: TextStyle(
                       color: isSelected ? Colors.amber : Colors.white70,
                       fontSize: 11,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    )),
-              )),
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ),
             ),
           );
         }).toList(),
@@ -216,7 +243,8 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.ev,
             label: 'EV',
-            value: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
+            value:
+                '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
           ),
           _pickerButton(
             type: SettingType.focus,
@@ -245,36 +273,44 @@ class ControlsOverlay extends StatelessWidget {
         onSelectDial(isActive ? SettingType.none : type);
       },
       behavior: HitTestBehavior.opaque,
-      child: _rotate(Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        decoration: BoxDecoration(
-          color: isActive ? Colors.amber.withOpacity(0.25) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isActive ? Colors.amber : Colors.transparent,
-            width: 1,
+      child: _rotate(
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: isActive
+                ? Colors.amber.withOpacity(0.25)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isActive ? Colors.amber : Colors.transparent,
+              width: 1,
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(value,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                value,
                 style: TextStyle(
                   color: isActive ? Colors.amber : Colors.white,
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
                   fontFamily: 'monospace',
-                )),
-            const SizedBox(height: 2),
-            Text(label,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
                 style: TextStyle(
                   color: isActive ? Colors.amber : Colors.grey,
                   fontSize: 8,
                   fontWeight: FontWeight.w600,
-                )),
-          ],
+                ),
+              ),
+            ],
+          ),
         ),
-      )),
+      ),
     );
   }
 
@@ -290,7 +326,9 @@ class ControlsOverlay extends StatelessWidget {
 
     switch (activeDial) {
       case SettingType.shutter:
-        currentValue = _shutterIndex(_secondsFromLabel(shutterSpeed)).toDouble();
+        currentValue = _shutterIndex(
+          _secondsFromLabel(shutterSpeed),
+        ).toDouble();
         minValue = 0;
         maxValue = (shutterSpeedValues.length - 1).toDouble();
         label = shutterSpeed;
@@ -312,7 +350,8 @@ class ControlsOverlay extends StatelessWidget {
         currentValue = exposureBias.clamp(-4.0, 4.0);
         minValue = -4.0;
         maxValue = 4.0;
-        label = '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV';
+        label =
+            '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV';
         divisions = 32;
         callback = onExposureBiasChanged;
         break;
@@ -342,10 +381,7 @@ class ControlsOverlay extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.78),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.amber.withOpacity(0.5),
-          width: 1,
-        ),
+        border: Border.all(color: Colors.amber.withOpacity(0.5), width: 1),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -431,10 +467,7 @@ class ControlsOverlay extends StatelessWidget {
               height: 75,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: isHdrPlusEnabled ? Colors.greenAccent : Colors.white,
-                  width: 4,
-                ),
+                border: Border.all(color: Colors.white, width: 4),
                 color: isCapturing ? Colors.white38 : Colors.white,
               ),
               child: Center(
@@ -442,14 +475,19 @@ class ControlsOverlay extends StatelessWidget {
                     ? const SizedBox(
                         width: 24,
                         height: 24,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
                     : Container(
                         width: 63,
                         height: 63,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isHdrPlusEnabled ? Colors.greenAccent : Colors.white,
-                        )),
+                          color: Colors.white,
+                        ),
+                      ),
               ),
             ),
           ),
@@ -625,7 +663,9 @@ class _MovingRulerPainter extends CustomPainter {
       final isMajor = index % 5 == 0;
       final isMedium = !isMajor && index % 2 == 0;
       final tickHeight = isMajor ? 26.0 : (isMedium ? 18.0 : 11.0);
-      final paint = isMajor ? majorPaint : (isMedium ? mediumPaint : minorPaint);
+      final paint = isMajor
+          ? majorPaint
+          : (isMedium ? mediumPaint : minorPaint);
 
       canvas.drawLine(
         Offset(x, centerY - tickHeight / 2),
@@ -645,7 +685,10 @@ class _MovingRulerPainter extends CustomPainter {
         ],
         stops: const [0, 0.18, 0.82, 1],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), edgeFadePaint);
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      edgeFadePaint,
+    );
 
     final indicatorPaint = Paint()
       ..color = Colors.amber
