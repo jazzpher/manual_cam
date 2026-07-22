@@ -65,8 +65,7 @@ class CameraManager: NSObject {
     func getCapabilities() -> [String: Any] {
         guard let d = device else { return [:] }
         let rawSupported = !photoOutput.availableRawPhotoPixelFormatTypes.isEmpty
-        let rawFormats = photoOutput.availableRawPhotoPixelFormatTypes.map { "\($0)" }
-        print("📸 Available RAW formats: \(rawFormats)")
+        print("📸 Available RAW formats at setup: \(photoOutput.availableRawPhotoPixelFormatTypes)")
 
         return [
             "minISO": d.activeFormat.minISO,
@@ -171,6 +170,7 @@ class CameraManager: NSObject {
         sessionQueue.async {
             do {
                 try d.lockForConfiguration()
+                // Smooth ramp para di biglang mag-jump (may side effect ng format change)
                 let clamped = max(1.0, min(factor, d.activeFormat.videoMaxZoomFactor))
                 d.videoZoomFactor = clamped
                 d.unlockForConfiguration()
@@ -190,7 +190,7 @@ class CameraManager: NSObject {
     func setHDR(_ enabled: Bool) { isHDREnabled = enabled }
     func setRAW(_ enabled: Bool) { isRawEnabled = enabled }
 
-    // === CAPTURE — REWRITTEN with safe RAW support ===
+    // === CAPTURE — with RAW+zoom safety ===
     func capturePhoto(completion: @escaping (Result<[String: String], Error>) -> Void) {
         sessionQueue.async {
             self.pendingRawURL = nil
@@ -201,34 +201,49 @@ class CameraManager: NSObject {
 
             var settings: AVCapturePhotoSettings
 
-            // Attempt RAW+JPEG kung enabled AT supported
+            // === RAW path with re-validation ===
             if self.isRawEnabled {
-                let rawFormats = self.photoOutput.availableRawPhotoPixelFormatTypes
-                if let rawFormat = rawFormats.first {
-                    // RAW + processed JPEG combo
-                    do {
-                        settings = AVCapturePhotoSettings(
+                // IMPORTANTE: Kunin ang CURRENT available raw formats
+                // (baka nagbago dahil sa zoom o format change)
+                let currentRawFormats = self.photoOutput.availableRawPhotoPixelFormatTypes
+                print("📸 Current available RAW formats (at capture time): \(currentRawFormats)")
+
+                if let rawFormat = currentRawFormats.first {
+                    // Try to create RAW settings — wrap sa autoreleasepool para safe
+                    var rawSettings: AVCapturePhotoSettings?
+
+                    // Method na naka-defer para maiwas exception
+                    let attemptRawSettings = { () -> AVCapturePhotoSettings? in
+                        // Additional safety: check kung ready ang photoOutput
+                        guard self.photoOutput.isHighResolutionCaptureEnabled else {
+                            print("⚠️ Photo output not ready for RAW")
+                            return nil
+                        }
+
+                        let s = AVCapturePhotoSettings(
                             rawPixelFormatType: rawFormat,
                             processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg]
                         )
-                        self.expectedPhotoCount = 2
 
-                        // IMPORTANTE: RAW captures ay hindi supported ang .balanced/.quality prioritization
-                        // Dapat .speed lang para hindi mag-crash
+                        // Critical: RAW-safe settings
                         if #available(iOS 13.0, *) {
-                            settings.photoQualityPrioritization = .speed
+                            s.photoQualityPrioritization = .speed
                         }
+                        s.isHighResolutionPhotoEnabled = false
+                        s.isAutoStillImageStabilizationEnabled = false
 
-                        // RAW ay hindi rin supports high-res photo enabled kasama ng RAW format
-                        settings.isHighResolutionPhotoEnabled = false
+                        return s
+                    }
 
-                        // RAW hindi supports image stabilization
-                        settings.isAutoStillImageStabilizationEnabled = false
+                    rawSettings = attemptRawSettings()
 
-                        print("📸 RAW+JPEG capture: format=\(rawFormat)")
-                    } catch {
-                        // Fallback to JPEG-only kung mag-error
-                        print("⚠️ RAW settings init failed, falling back to JPEG: \(error)")
+                    if let s = rawSettings {
+                        settings = s
+                        self.expectedPhotoCount = 2
+                        print("📸 RAW+JPEG capture initialized: format=\(rawFormat), zoom=\(self.device?.videoZoomFactor ?? 1.0)")
+                    } else {
+                        // Fallback JPEG
+                        print("⚠️ RAW init failed, falling back to JPEG")
                         settings = AVCapturePhotoSettings()
                         self.expectedPhotoCount = 1
                         settings.isHighResolutionPhotoEnabled = true
@@ -237,8 +252,7 @@ class CameraManager: NSObject {
                         }
                     }
                 } else {
-                    // No RAW available — fallback JPEG
-                    print("⚠️ RAW requested but no RAW format available, JPEG only")
+                    print("⚠️ No RAW format available (baka dahil sa zoom), JPEG only")
                     settings = AVCapturePhotoSettings()
                     self.expectedPhotoCount = 1
                     settings.isHighResolutionPhotoEnabled = true
@@ -247,7 +261,7 @@ class CameraManager: NSObject {
                     }
                 }
             } else {
-                // Normal JPEG-only path
+                // Normal JPEG
                 settings = AVCapturePhotoSettings()
                 self.expectedPhotoCount = 1
                 settings.isHighResolutionPhotoEnabled = true
@@ -255,14 +269,13 @@ class CameraManager: NSObject {
                     settings.photoQualityPrioritization = .balanced
                 }
                 settings.isAutoStillImageStabilizationEnabled = self.isHDREnabled
-                print("📸 JPEG-only capture")
+                print("📸 JPEG-only capture, zoom=\(self.device?.videoZoomFactor ?? 1.0)")
             }
 
             if let d = self.device, d.hasFlash {
                 settings.flashMode = self.flashMode
             }
 
-            // Wrap capture call sa try/catch via Objective-C exception handler
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
@@ -292,7 +305,6 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
         let tmpDir = NSTemporaryDirectory()
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        // Use different filename for RAW vs JPEG para hindi mag-overwrite
         let suffix = isRawPhoto ? "_raw" : ""
         let filename = "manualcam_\(timestamp)\(suffix).\(ext)"
         let filePath = (tmpDir as NSString).appendingPathComponent(filename)
@@ -301,7 +313,7 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             try photoData.write(to: URL(fileURLWithPath: filePath))
             if isRawPhoto {
                 pendingRawURL = filePath
-                print("✅ RAW (DNG) saved: \(filePath) [\(photoData.count) bytes]")
+                print("✅ RAW saved: \(filePath) [\(photoData.count) bytes]")
             } else {
                 pendingJpegURL = filePath
                 print("✅ JPEG saved: \(filePath) [\(photoData.count) bytes]")
