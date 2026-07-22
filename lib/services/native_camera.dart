@@ -5,7 +5,7 @@ import 'package:gal/gal.dart';
 import 'package:image/image.dart' as img;
 
 /// Bridge sa native iOS AVFoundation camera.
-/// HDR+ processing ay ginagawa sa Swift side using Core Image (Metal GPU).
+/// HDR+ processing ay ginagawa sa Swift side using CIRAWFilter (true 14-bit).
 class NativeCamera {
   static const _channel = MethodChannel('manual_cam/camera');
 
@@ -26,7 +26,8 @@ class NativeCamera {
   bool get supportsHDR => _capabilities['supportsHDR'] as bool? ?? false;
   bool get supportsRAW => _capabilities['supportsRAW'] as bool? ?? false;
 
-  /// Setter for HDR+ mode — automatically syncs sa native side
+  /// [CHANGED] HDR+ setter — auto-enables RAW mode kasi kailangan ng DNG
+  /// para sa true 14-bit CIRAWFilter processing sa Swift side.
   bool get hdrMode => _hdrMode;
   set hdrMode(bool enabled) {
     _hdrMode = enabled;
@@ -34,6 +35,13 @@ class NativeCamera {
     _channel.invokeMethod('setHdrPlus', {'enabled': enabled}).catchError((e) {
       print('setHdrPlus error: $e');
     });
+    // [NEW] IMPORTANT: Auto-enable RAW mode kapag HDR+ is ON
+    // Kasi walang DNG = walang 14-bit source = walang HDR+ processing possible
+    if (enabled && supportsRAW) {
+      _channel.invokeMethod('setRAW', {'enabled': true}).catchError((e) {
+        print('auto-enable RAW error: $e');
+      });
+    }
   }
 
   Future<void> initialize() async {
@@ -96,6 +104,11 @@ class NativeCamera {
   }
 
   Future<void> setRAW(bool enabled) async {
+    // [NEW] Prevent disabling RAW kapag HDR+ ay ON
+    if (!enabled && _hdrMode) {
+      print('⚠️ Cannot disable RAW while HDR+ is ON (RAW is required for 14-bit HDR)');
+      return;
+    }
     try { await _channel.invokeMethod('setRAW', {'enabled': enabled}); }
     catch (e) { print('setRAW error: $e'); }
   }
@@ -109,7 +122,7 @@ class NativeCamera {
     }
   }
 
-  /// Regular capture. Native HDR+ ay auto-applied sa Swift side kapag `hdrMode` ON.
+  /// Regular capture. Native 14-bit HDR+ ay auto-applied sa Swift side kapag `hdrMode` ON.
   /// Yung DNG/RAW ay untouched (para sa Lightroom editing).
   Future<Map<String, String>> capturePhoto() async {
     try {
@@ -141,8 +154,9 @@ class NativeCamera {
         } catch (e) { print('⚠️ JPEG crop failed: $e'); }
       }
 
-      // NOTE: HDR+ processing ay ginagawa na sa native Swift side
-      // via Core Image (Metal GPU). Walang Dart-side processing needed.
+      // NOTE: True 14-bit HDR+ processing ay ginagawa na sa native Swift side
+      // via CIRAWFilter. Yung JPEG na binalik sa amin ay HDR-processed na kung
+      // naka-enable ang hdrMode.
 
       // Save to Photos app
       try {
