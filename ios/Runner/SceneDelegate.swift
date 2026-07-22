@@ -77,11 +77,6 @@ class SceneDelegate: FlutterSceneDelegate {
                 let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
                 mgr.setHDR(enabled)
                 result(true)
-            case "setHdrPlus":
-                // === BAGONG HANDLER for native HDR+ ===
-                let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
-                mgr.setHdrPlus(enabled)
-                result(true)
             case "setRAW":
                 let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
                 mgr.setRAW(enabled)

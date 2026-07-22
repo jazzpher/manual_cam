@@ -2,16 +2,12 @@ import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:gal/gal.dart';
 
-/// Bridge sa native iOS AVFoundation camera.
-/// HDR+ processing at software zoom crop ay ginagawa sa Swift side (Metal GPU).
+/// Native iOS AVFoundation bridge with GPU-based RAW companion JPEG zoom.
 class NativeCamera {
   static const _channel = MethodChannel('manual_cam/camera');
 
   bool _initialized = false;
   Map<String, dynamic> _capabilities = {};
-
-  // HDR+ mode state — pinapasa sa native side via method channel
-  bool _hdrMode = false;
 
   bool get isInitialized => _initialized;
   Map<String, dynamic> get capabilities => _capabilities;
@@ -23,22 +19,6 @@ class NativeCamera {
   double get maxZoom => (_capabilities['maxZoom'] as num?)?.toDouble() ?? 10.0;
   bool get supportsHDR => _capabilities['supportsHDR'] as bool? ?? false;
   bool get supportsRAW => _capabilities['supportsRAW'] as bool? ?? false;
-
-  /// HDR+ setter — auto-enables RAW mode kasi kailangan ng DNG
-  /// para sa true 14-bit CIRAWFilter processing sa Swift side.
-  bool get hdrMode => _hdrMode;
-  set hdrMode(bool enabled) {
-    _hdrMode = enabled;
-    _channel.invokeMethod('setHdrPlus', {'enabled': enabled}).catchError((e) {
-      print('setHdrPlus error: $e');
-    });
-    // Auto-enable RAW kapag HDR+ is ON — walang DNG = walang 14-bit HDR
-    if (enabled && supportsRAW) {
-      _channel.invokeMethod('setRAW', {'enabled': true}).catchError((e) {
-        print('auto-enable RAW error: $e');
-      });
-    }
-  }
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -100,11 +80,6 @@ class NativeCamera {
   }
 
   Future<void> setRAW(bool enabled) async {
-    // Prevent disabling RAW kapag HDR+ ay ON
-    if (!enabled && _hdrMode) {
-      print('⚠️ Cannot disable RAW while HDR+ is ON (RAW is required for 14-bit HDR)');
-      return;
-    }
     try { await _channel.invokeMethod('setRAW', {'enabled': enabled}); }
     catch (e) { print('setRAW error: $e'); }
   }
@@ -118,8 +93,8 @@ class NativeCamera {
     }
   }
 
-  /// Regular capture. HDR+ processing AT software zoom crop ay handled na sa Swift side.
-  /// Yung DNG/RAW ay untouched (para sa Lightroom editing).
+  /// Regular capture. The DNG/RAW stays untouched for editing.
+  /// A RAW companion JPEG may be center-cropped on the native GPU for zoom.
   Future<Map<String, String>> capturePhoto() async {
     try {
       final result = await _channel.invokeMethod('capturePhoto');
@@ -141,9 +116,6 @@ class NativeCamera {
       }
 
       if (paths.isEmpty) throw Exception('No files created');
-
-      // NOTE: Software zoom crop AT HDR+ processing ay ginagawa na sa Swift side.
-      // Yung JPEG na binalik sa amin ay pre-processed na (kung applicable).
 
       // Save to Photos app
       try {

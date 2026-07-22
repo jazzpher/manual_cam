@@ -58,7 +58,6 @@ class _CameraScreenState extends State<CameraScreen> {
   double _focus = 0.5;
   bool _isHDREnabled = false;
   bool _isRawEnabled = false;
-  bool _isHdrPlusEnabled = false;
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
@@ -178,30 +177,6 @@ class _CameraScreenState extends State<CameraScreen> {
     await _camera.setRAW(_isRawEnabled);
   }
 
-  Future<void> _toggleHdrPlus() async {
-    setState(() {
-      _isHdrPlusEnabled = !_isHdrPlusEnabled;
-      _camera.hdrMode = _isHdrPlusEnabled;
-    });
-
-    if (_isHdrPlusEnabled && _supportsRAW && !_isRawEnabled) {
-      setState(() => _isRawEnabled = true);
-      await _camera.setRAW(true);
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_isHdrPlusEnabled
-              ? '🌈 HDR mode ON — single-shot digital exposure bracketing'
-              : '🌈 HDR mode OFF — normal capture'),
-          backgroundColor: Colors.green.shade700,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-  }
-
   // === DIAL SELECTION CALLBACK ===
   void _onSelectDial(SettingType type) {
     setState(() => _activeDial = type);
@@ -219,16 +194,6 @@ class _CameraScreenState extends State<CameraScreen> {
     if (_isCapturing) return;
     setState(() => _isCapturing = true);
 
-    if (_isHdrPlusEnabled && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🌈 Processing HDR...'),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
-
     try {
       final paths = await _camera.capturePhoto();
       if (mounted) {
@@ -237,11 +202,9 @@ class _CameraScreenState extends State<CameraScreen> {
         final hasRaw = paths.containsKey('raw');
         final zoom = paths['zoom'] ?? '1.0';
         final zoomLabel = zoom == '1.0' ? '' : ' (${zoom}x)';
-        final hdrLabel = _isHdrPlusEnabled ? ' 🌈' : '';
-
         final message = hasRaw
-            ? '📸 RAW + JPEG saved$zoomLabel$hdrLabel'
-            : '📸 JPEG saved$zoomLabel$hdrLabel';
+            ? '📸 RAW + JPEG saved$zoomLabel'
+            : '📸 JPEG saved$zoomLabel';
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -271,7 +234,6 @@ class _CameraScreenState extends State<CameraScreen> {
     final parts = <String>[];
     if (_isRawEnabled) parts.add('RAW+JPEG');
     else parts.add('JPEG');
-    if (_isHdrPlusEnabled) parts.add('HDR');
     return parts.join(' · ');
   }
 
@@ -356,7 +318,6 @@ class _CameraScreenState extends State<CameraScreen> {
             flashMode: _flashMode,
             isHDREnabled: _isHDREnabled,
             isRawEnabled: _isRawEnabled,
-            isHdrPlusEnabled: _isHdrPlusEnabled,
             isCapturing: _isCapturing,
             uiOrientation: _uiOrientation,
             activeDial: _activeDial,
@@ -371,7 +332,6 @@ class _CameraScreenState extends State<CameraScreen> {
             onCapture: _capturePhoto,
             onToggleHDR: _toggleHDR,
             onToggleRAW: _toggleRAW,
-            onToggleHdrPlus: _toggleHdrPlus,
           ),
 
           Positioned(

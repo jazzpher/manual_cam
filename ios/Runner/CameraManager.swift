@@ -15,7 +15,6 @@ class CameraManager: NSObject {
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
     private var isHDREnabled = false
     private var isRawEnabled = false
-    private var isHdrPlusEnabled = false
     private var flashMode: AVCaptureDevice.FlashMode = .off
     private var lastPhotoCompletion: ((Result<[String: String], Error>) -> Void)?
 
@@ -285,12 +284,6 @@ class CameraManager: NSObject {
 
     func setHDR(_ enabled: Bool) { isHDREnabled = enabled }
 
-    // HDR+ now requires RAW to work (kailangan ng DNG file for CIRAWFilter)
-    func setHdrPlus(_ enabled: Bool) {
-        isHdrPlusEnabled = enabled
-        print("🌈 Native HDR+ set to: \(enabled) (requires RAW mode for true 14-bit processing)")
-    }
-
     var currentSoftwareZoom: CGFloat { softwareZoomFactor }
     var isInRawMode: Bool { isRawEnabled }
 
@@ -343,164 +336,49 @@ class CameraManager: NSObject {
         }
     }
 
-    // [NEW] === ADAPTIVE HDR VALUES via HISTOGRAM ANALYSIS ===
-    // Analyze scene brightness using downsampled image + area average.
-    // Returns tuple: (exposure adjustment, shadow bias, detail amount)
-    //
-    // Logic:
-    //   - Dark scene (mean < 60): mag-lift lang ng shadows, minimal highlight recovery
-    //   - Bright scene (mean > 180): aggressive highlight recovery
-    //   - Balanced scene (60-180): moderate both
-    private func analyzeScene(_ ciImage: CIImage) -> (exposure: Float, shadowBias: Float, detailAmount: Float) {
-        // Downsample to tiny size para mabilis mag-analyze (yung pixel average lang naman ang kailangan)
-        let extent = ciImage.extent
+    // Center-crop only the JPEG companion when RAW mode uses software zoom.
+    // No HDR, tone mapping, exposure, shadow, or saturation adjustment is applied.
+    private func applySoftwareZoom(toJPEGAt path: String) -> String? {
+        guard softwareZoomFactor > 1.01 else { return path }
 
-        // Use CIAreaAverage filter — GPU-accelerated single-pixel output
-        guard let filter = CIFilter(name: "CIAreaAverage") else {
-            return (-0.3, 0.4, 0.2)  // Fallback to defaults
-        }
-        filter.setValue(ciImage, forKey: kCIInputImageKey)
-        filter.setValue(CIVector(cgRect: extent), forKey: kCIInputExtentKey)
-
-        guard let output = filter.outputImage else {
-            return (-0.3, 0.4, 0.2)
-        }
-
-        // Render single pixel to get average RGB
-        var bitmap = [UInt8](repeating: 0, count: 4)
-        ciContext.render(output,
-                         toBitmap: &bitmap,
-                         rowBytes: 4,
-                         bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-                         format: .RGBA8,
-                         colorSpace: CGColorSpaceCreateDeviceRGB())
-
-        // Compute luminance (BT.601 weights)
-        let r = Float(bitmap[0])
-        let g = Float(bitmap[1])
-        let b = Float(bitmap[2])
-        let meanBrightness = (0.299 * r + 0.587 * g + 0.114 * b)  // 0-255
-
-        print("📊 Scene analysis: mean brightness = \(meanBrightness) / 255")
-
-        // Adaptive value curves
-        var exposure: Float
-        var shadowBias: Float
-        var detailAmount: Float
-
-        if meanBrightness < 60 {
-            // DARK SCENE — need mas maraming shadow lift, minimal highlight recovery
-            // Halimbawa: indoor low-light, night shots
-            let darkness = (60 - meanBrightness) / 60  // 0-1, more dark = higher
-            exposure = -0.1 * (1.0 - darkness)         // 0 to -0.1 (mas kaunting recovery)
-            shadowBias = 0.4 + 0.4 * darkness          // 0.4 to 0.8 (aggressive lift)
-            detailAmount = 0.15 + 0.15 * darkness      // 0.15 to 0.3
-            print("🌑 Dark scene detected: exposure=\(exposure), shadow=\(shadowBias)")
-        } else if meanBrightness > 180 {
-            // BRIGHT SCENE — need aggressive highlight recovery
-            // Halimbawa: outdoor daylight, snow, beach
-            let brightness = (meanBrightness - 180) / 75  // 0-1, more bright = higher
-            let brightnessCapped = min(brightness, 1.0)
-            exposure = -0.3 - 0.5 * brightnessCapped   // -0.3 to -0.8 (aggressive dim)
-            shadowBias = 0.3 - 0.1 * brightnessCapped  // 0.3 to 0.2 (moderate lift)
-            detailAmount = 0.2 + 0.1 * brightnessCapped
-            print("☀️ Bright scene detected: exposure=\(exposure), shadow=\(shadowBias)")
-        } else {
-            // BALANCED SCENE — moderate values (yung dating hardcoded)
-            exposure = -0.3
-            shadowBias = 0.4
-            detailAmount = 0.2
-            print("⚖️ Balanced scene: using default HDR values")
-        }
-
-        return (exposure, shadowBias, detailAmount)
-    }
-
-    // === TRUE 14-BIT RAW HDR PROCESSING ===
-    // Requires iOS 15.0+ (CIRAWFilter API)
-    //
-    // [CHANGED] Now uses adaptive HDR values via histogram analysis
-    // [NEW] GPU-based center-crop kung naka-zoom (dating sa Dart pa, mabagal)
-    @available(iOS 15.0, *)
-    private func applyRawHDR(dngURL: URL) -> String? {
-        print("🌈 Loading RAW DNG for 14-bit HDR processing...")
-
-        guard let rawFilter = CIRAWFilter(imageURL: dngURL) else {
-            print("⚠️ Failed to create CIRAWFilter from DNG")
+        let sourceURL = URL(fileURLWithPath: path)
+        guard var image = CIImage(
+            contentsOf: sourceURL,
+            options: [.applyOrientationProperty: true]
+        ) else {
+            print("⚠️ Failed to load JPEG for software zoom")
             return nil
         }
 
-        // First pass — get initial RAW output for scene analysis (before adjustments)
-        guard let initialOutput = rawFilter.outputImage else {
-            print("⚠️ Failed to get initial RAW output for analysis")
+        let cropFactor = 1.0 / softwareZoomFactor
+        let extent = image.extent
+        let cropWidth = extent.width * cropFactor
+        let cropHeight = extent.height * cropFactor
+        let cropRect = CGRect(
+            x: extent.midX - cropWidth / 2.0,
+            y: extent.midY - cropHeight / 2.0,
+            width: cropWidth,
+            height: cropHeight
+        )
+        image = image.cropped(to: cropRect)
+
+        guard let cgImage = ciContext.createCGImage(image, from: image.extent),
+              let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.95) else {
+            print("⚠️ Failed to render software-zoom JPEG")
             return nil
         }
 
-        // [NEW] Analyze scene brightness for adaptive HDR
-        let (exposure, shadowBias, detailAmount) = analyzeScene(initialOutput)
-
-        // Apply adaptive tone mapping
-        rawFilter.exposure = exposure
-        rawFilter.shadowBias = shadowBias
-        rawFilter.detailAmount = detailAmount
-
-        guard var processed = rawFilter.outputImage else {
-            print("⚠️ Failed to render RAW output image")
-            return nil
-        }
-
-        // Additional local tone mapping (Apple's CIHighlightShadowAdjust)
-        // Very subtle — mainly for local contrast tuning after RAW pipeline
-        if let filter = CIFilter(name: "CIHighlightShadowAdjust") {
-            filter.setValue(processed, forKey: kCIInputImageKey)
-            filter.setValue(-0.15, forKey: "inputHighlightAmount")
-            filter.setValue(0.2, forKey: "inputShadowAmount")
-            filter.setValue(1.5, forKey: "inputRadius")
-            if let output = filter.outputImage {
-                processed = output
-            }
-        }
-
-        // [NEW] === GPU-BASED SOFTWARE ZOOM CROP ===
-        // Kung naka-zoom > 1.0x, center-crop ang final image sa Swift side
-        // (mas mabilis kaysa Dart image package na CPU-bound)
-        if self.softwareZoomFactor > 1.01 {
-            let cropFactor = 1.0 / self.softwareZoomFactor
-            let extent = processed.extent
-            let cropWidth = extent.width * cropFactor
-            let cropHeight = extent.height * cropFactor
-            let cropX = extent.origin.x + (extent.width - cropWidth) / 2.0
-            let cropY = extent.origin.y + (extent.height - cropHeight) / 2.0
-
-            let cropRect = CGRect(x: cropX, y: cropY, width: cropWidth, height: cropHeight)
-            processed = processed.cropped(to: cropRect)
-            print("📸 GPU crop applied: \(self.softwareZoomFactor)x zoom, target rect=\(cropRect)")
-        }
-
-        // Render to JPEG via Metal GPU
-        guard let cgImage = ciContext.createCGImage(processed, from: processed.extent) else {
-            print("⚠️ Failed to render final CGImage")
-            return nil
-        }
-
-        let uiImage = UIImage(cgImage: cgImage)
-        guard let jpegData = uiImage.jpegData(compressionQuality: 0.95) else {
-            print("⚠️ Failed to encode JPEG")
-            return nil
-        }
-
-        // Save yung HDR-processed JPEG sa temp folder
         let tmpDir = NSTemporaryDirectory()
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        let filename = "manualcam_\(timestamp)_hdr.jpg"
-        let filePath = (tmpDir as NSString).appendingPathComponent(filename)
+        let filename = "manualcam_\(timestamp)_zoom.jpg"
+        let outputPath = (tmpDir as NSString).appendingPathComponent(filename)
 
         do {
-            try jpegData.write(to: URL(fileURLWithPath: filePath))
-            print("✅ True 14-bit RAW HDR processed: \(filePath) [\(jpegData.count) bytes]")
-            return filePath
+            try jpegData.write(to: URL(fileURLWithPath: outputPath))
+            print("✅ GPU software zoom applied: \(softwareZoomFactor)x")
+            return outputPath
         } catch {
-            print("⚠️ Failed to write HDR JPEG: \(error)")
+            print("⚠️ Failed to save software-zoom JPEG: \(error)")
             return nil
         }
     }
@@ -557,24 +435,17 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
         if receivedPhotoCount >= expectedPhotoCount || captureError != nil {
 
-            // APPLY TRUE 14-BIT HDR AFTER LAHAT NG PHOTOS RECEIVED
-            if isHdrPlusEnabled, captureError == nil, let rawPath = pendingRawURL {
-                if #available(iOS 15.0, *) {
-                    print("🌈 Starting true 14-bit RAW HDR pipeline (adaptive)...")
-                    let rawURL = URL(fileURLWithPath: rawPath)
-
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        if let hdrPath = self.applyRawHDR(dngURL: rawURL) {
-                            self.pendingJpegURL = hdrPath
-                            print("✅ HDR+ (14-bit adaptive) done")
-                        } else {
-                            print("⚠️ HDR+ failed, using original JPEG")
-                        }
-                        self.completeCallback()
+            // RAW files remain untouched. Only the companion JPEG is cropped
+            // when software zoom is active.
+            if captureError == nil,
+               isRawEnabled,
+               softwareZoomFactor > 1.01,
+               let jpegPath = pendingJpegURL {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    if let zoomedPath = self.applySoftwareZoom(toJPEGAt: jpegPath) {
+                        self.pendingJpegURL = zoomedPath
                     }
-                } else {
-                    print("⚠️ HDR+ requires iOS 15.0+, skipping")
-                    completeCallback()
+                    self.completeCallback()
                 }
             } else {
                 completeCallback()
