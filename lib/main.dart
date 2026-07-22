@@ -58,7 +58,7 @@ class _CameraScreenState extends State<CameraScreen> {
   double _focus = 0.5;
   bool _isHDREnabled = false;
   bool _isRawEnabled = false;
-  bool _isCineEnabled = false;
+  bool _isHdrPlusEnabled = false; // === BAGO: Single-shot HDR mode ===
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
@@ -180,19 +180,27 @@ class _CameraScreenState extends State<CameraScreen> {
     await _camera.setRAW(_isRawEnabled);
   }
 
-  void _toggleCine() {
+  // === BAGONG TOGGLE: SINGLE-SHOT HDR ===
+  // Kapag ON, force RAW mode din para may attached JPEG at DNG both saved.
+  Future<void> _toggleHdrPlus() async {
     setState(() {
-      _isCineEnabled = !_isCineEnabled;
-      _camera.cinematicMode = _isCineEnabled;
+      _isHdrPlusEnabled = !_isHdrPlusEnabled;
+      _camera.hdrMode = _isHdrPlusEnabled;
     });
+
+    // Auto-enable RAW pag naka-HDR (para may DNG na backup at may JPEG preview to work with)
+    if (_isHdrPlusEnabled && _supportsRAW && !_isRawEnabled) {
+      setState(() => _isRawEnabled = true);
+      await _camera.setRAW(true);
+    }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_isCineEnabled
-              ? '🎬 CINE mode ON — teal-orange grade + 2.35:1 letterbox'
-              : '🎬 CINE mode OFF — normal capture'),
-          backgroundColor: Colors.deepOrange.shade700,
+          content: Text(_isHdrPlusEnabled
+              ? '🌈 HDR mode ON — single-shot digital exposure bracketing (handhold-friendly)'
+              : '🌈 HDR mode OFF — normal capture'),
+          backgroundColor: Colors.green.shade700,
           duration: const Duration(seconds: 3),
         ),
       );
@@ -211,11 +219,11 @@ class _CameraScreenState extends State<CameraScreen> {
     if (_isCapturing) return;
     setState(() => _isCapturing = true);
 
-    if (_isCineEnabled && mounted) {
+    if (_isHdrPlusEnabled && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('🎬 Applying cinematic grade...'),
-          backgroundColor: Colors.deepOrange,
+          content: Text('🌈 Processing HDR...'),
+          backgroundColor: Colors.green,
           duration: Duration(seconds: 2),
         ),
       );
@@ -229,11 +237,11 @@ class _CameraScreenState extends State<CameraScreen> {
         final hasRaw = paths.containsKey('raw');
         final zoom = paths['zoom'] ?? '1.0';
         final zoomLabel = zoom == '1.0' ? '' : ' (${zoom}x)';
-        final cineLabel = _isCineEnabled ? ' 🎬' : '';
+        final hdrLabel = _isHdrPlusEnabled ? ' 🌈' : '';
 
         final message = hasRaw
-            ? '📸 RAW + JPEG saved$zoomLabel$cineLabel'
-            : '📸 JPEG saved$zoomLabel$cineLabel';
+            ? '📸 RAW + JPEG saved$zoomLabel$hdrLabel'
+            : '📸 JPEG saved$zoomLabel$hdrLabel';
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -273,7 +281,7 @@ class _CameraScreenState extends State<CameraScreen> {
     final parts = <String>[];
     if (_isRawEnabled) parts.add('RAW+JPEG');
     else parts.add('JPEG');
-    if (_isCineEnabled) parts.add('CINE');
+    if (_isHdrPlusEnabled) parts.add('HDR');
     return parts.join(' · ');
   }
 
@@ -325,27 +333,6 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
 
-          if (_isCineEnabled)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final w = constraints.maxWidth;
-                    final h = constraints.maxHeight;
-                    final visibleH = w / 2.35;
-                    final barH = ((h - visibleH) / 2).clamp(0.0, h / 2);
-                    return Column(
-                      children: [
-                        Container(width: w, height: barH, color: Colors.black.withOpacity(0.85)),
-                        Expanded(child: Container()),
-                        Container(width: w, height: barH, color: Colors.black.withOpacity(0.85)),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-
           if (_tapFocusPoint != null) _buildFocusReticle(_tapFocusPoint!),
 
           Positioned(
@@ -379,7 +366,7 @@ class _CameraScreenState extends State<CameraScreen> {
             flashMode: _flashMode,
             isHDREnabled: _isHDREnabled,
             isRawEnabled: _isRawEnabled,
-            isCineEnabled: _isCineEnabled,
+            isHdrPlusEnabled: _isHdrPlusEnabled,
             isCapturing: _isCapturing,
             uiOrientation: _uiOrientation,
             onISOChanged: _setISO,
@@ -392,7 +379,7 @@ class _CameraScreenState extends State<CameraScreen> {
             onCapture: _capturePhoto,
             onToggleHDR: _toggleHDR,
             onToggleRAW: _toggleRAW,
-            onToggleCine: _toggleCine,
+            onToggleHdrPlus: _toggleHdrPlus,
             onCloseAllPopups: _closeAllPopups,
             showISOSlider: _showISOSlider,
             onToggleISOSlider: () {

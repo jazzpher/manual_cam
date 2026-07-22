@@ -12,9 +12,11 @@ class NativeCamera {
   bool _initialized = false;
   Map<String, dynamic> _capabilities = {};
 
-  // === CINEMATIC MODE STATE ===
-  bool cinematicMode = false;
-  bool letterboxEnabled = true;
+  // === HDR MODE STATE ===
+  // Kapag ON, magcacapture ng RAW+JPEG tapos gagawa ng
+  // 3 virtual exposures mula sa JPEG (via digital brightening/darkening)
+  // tapos i-blend as single HDR JPEG.
+  bool hdrMode = false;
 
   bool get isInitialized => _initialized;
   Map<String, dynamic> get capabilities => _capabilities;
@@ -92,7 +94,6 @@ class NativeCamera {
   }
 
   /// Get physical device orientation from native (via CoreMotion).
-  /// Returns: 0=portrait, 1=landscapeRight, 2=upsideDown, 3=landscapeLeft
   Future<int> getCurrentOrientationCode() async {
     try {
       final result = await _channel.invokeMethod('getOrientation');
@@ -102,7 +103,7 @@ class NativeCamera {
     }
   }
 
-  /// Regular capture. Auto-applies cinematic grade sa JPEG kapag `cinematicMode` ON.
+  /// Regular capture. Auto-applies HDR mode kapag `hdrMode` ON.
   Future<Map<String, String>> capturePhoto() async {
     try {
       final result = await _channel.invokeMethod('capturePhoto');
@@ -133,19 +134,16 @@ class NativeCamera {
         } catch (e) { print('⚠️ JPEG crop failed: $e'); }
       }
 
-      // === CINEMATIC GRADE ===
-      if (cinematicMode && paths['jpeg'] != null) {
+      // === HDR MODE: Single-shot digital exposure bracketing ===
+      if (hdrMode && paths['jpeg'] != null) {
         try {
-          print('🎬 Applying cinematic grade...');
-          final gradedPath = await _applyCinematicGrade(
-            paths['jpeg']!,
-            letterbox: letterboxEnabled,
-          );
-          if (gradedPath != null) {
-            paths['jpeg'] = gradedPath;
-            print('✅ Cinematic grade applied');
+          print('🌈 Applying single-shot HDR (digital bracketing)...');
+          final hdrPath = await _applyDigitalHDR(paths['jpeg']!);
+          if (hdrPath != null) {
+            paths['jpeg'] = hdrPath;
+            print('✅ HDR applied');
           }
-        } catch (e) { print('⚠️ Cinematic grade failed: $e'); }
+        } catch (e) { print('⚠️ HDR failed: $e'); }
       }
 
       // Save to Photos app
@@ -168,100 +166,126 @@ class NativeCamera {
     }
   }
 
-  /// Applies 5-layer cinematic grade: teal-orange, S-curve, rolloff, vignette, letterbox.
-  Future<String?> _applyCinematicGrade(String jpegPath, {bool letterbox = true}) async {
+  /// === SINGLE-SHOT DIGITAL HDR ===
+  /// Gumagawa ng 3 virtual exposures mula sa iisang JPEG:
+  ///   - Underexposed (-2 EV): tone-mapped to recover highlights
+  ///   - Normal (0 EV): baseline
+  ///   - Overexposed (+2 EV): tone-mapped to lift shadows
+  /// Tapos i-blend gamit ang luminance-weighted masking:
+  ///   - Bright pixels → use underexposed version
+  ///   - Dark pixels → use overexposed version
+  ///   - Mid pixels → mostly normal
+  ///
+  /// Advantage: hindi kailangan ng multiple shots, walang ghosting/blur risk,
+  /// handhold-friendly.
+  Future<String?> _applyDigitalHDR(String jpegPath) async {
     try {
       final file = File(jpegPath);
       final bytes = await file.readAsBytes();
-      var image = img.decodeJpg(bytes);
+      final image = img.decodeJpg(bytes);
       if (image == null) return null;
 
       final w = image.width;
       final h = image.height;
-      final cx = w / 2.0;
-      final cy = h / 2.0;
-      final maxDistSq = (cx * cx + cy * cy);
 
-      // Pre-compute S-curve lookup table
-      final sCurve = List<int>.generate(256, (v) {
-        final normalized = v / 255.0;
-        final curved = 1.0 / (1.0 + math.exp(-6.0 * (normalized - 0.5)));
-        return (curved * 255.0).round().clamp(0, 255);
+      // === Pre-compute exposure lookup tables (LUTs) ===
+      // Under: darker (0.5x brightness) with gamma to preserve highlights detail
+      final underLUT = List<int>.generate(256, (v) {
+        final n = v / 255.0;
+        // Reduce by ~2 EV = 4x darker sa linear (but nonlinear para may detail sa highlights)
+        final darkened = math.pow(n, 2.0).toDouble() * 255.0;
+        return darkened.round().clamp(0, 255);
       });
+
+      // Over: brighter (2x) with inverse gamma to preserve shadow detail
+      final overLUT = List<int>.generate(256, (v) {
+        final n = v / 255.0;
+        // Boost by ~2 EV = 4x brighter sa linear, tapos compress na hindi mag-blowout
+        final brightened = math.pow(n, 0.5).toDouble() * 255.0;
+        return brightened.round().clamp(0, 255);
+      });
+
+      // === Blend using luminance-weighted masking ===
+      // Ito ang core ng "HDR merge":
+      //   - Bright areas (>200): use UNDER (para may detail yung sky, atbp.)
+      //   - Dark areas (<55): use OVER (para makita yung shadows)
+      //   - Midtones (55-200): mostly NORMAL
 
       for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
           final pixel = image.getPixel(x, y);
-          double r = pixel.r.toDouble();
-          double g = pixel.g.toDouble();
-          double b = pixel.b.toDouble();
+          final r = pixel.r.toInt().clamp(0, 255);
+          final g = pixel.g.toInt().clamp(0, 255);
+          final b = pixel.b.toInt().clamp(0, 255);
 
-          // 1. Teal-orange grade based on luminance
+          // Virtual exposures
+          final ur = underLUT[r], ug = underLUT[g], ub = underLUT[b];
+          final or_ = overLUT[r], og = overLUT[g], ob = overLUT[b];
+          // Normal = r, g, b as-is
+
+          // Luminance of original (for masking weights)
           final lum = 0.299 * r + 0.587 * g + 0.114 * b;
-          final normLum = lum / 255.0;
-          final shadowW = 1.0 - normLum;
-          final highlightW = normLum;
 
-          r += -8.0 * shadowW + 10.0 * highlightW;
-          g += 4.0 * shadowW + 4.0 * highlightW;
-          b += 12.0 * shadowW - 8.0 * highlightW;
+          double wUnder, wNormal, wOver;
 
-          // 2. S-curve contrast
-          r = sCurve[r.round().clamp(0, 255)].toDouble();
-          g = sCurve[g.round().clamp(0, 255)].toDouble();
-          b = sCurve[b.round().clamp(0, 255)].toDouble();
+          if (lum > 200) {
+            // Very bright — favor UNDER (recover highlights)
+            final t = ((lum - 200) / 55).clamp(0.0, 1.0);
+            wUnder = 0.5 + 0.4 * t;
+            wNormal = 0.4 - 0.3 * t;
+            wOver = 0.1 - 0.1 * t;
+          } else if (lum > 140) {
+            // Highlights — mix under+normal
+            final t = ((lum - 140) / 60).clamp(0.0, 1.0);
+            wUnder = 0.2 + 0.3 * t;
+            wNormal = 0.7 - 0.2 * t;
+            wOver = 0.1 - 0.1 * t;
+          } else if (lum < 55) {
+            // Very dark — favor OVER (lift shadows)
+            final t = ((55 - lum) / 55).clamp(0.0, 1.0);
+            wOver = 0.5 + 0.4 * t;
+            wNormal = 0.4 - 0.3 * t;
+            wUnder = 0.1 - 0.1 * t;
+          } else if (lum < 115) {
+            // Shadows — mix normal+over
+            final t = ((115 - lum) / 60).clamp(0.0, 1.0);
+            wOver = 0.2 + 0.3 * t;
+            wNormal = 0.7 - 0.2 * t;
+            wUnder = 0.1 - 0.1 * t;
+          } else {
+            // Midtones — mostly normal
+            wUnder = 0.15;
+            wNormal = 0.7;
+            wOver = 0.15;
+          }
 
-          // 3. Highlight rolloff
-          if (r > 230) r = 230 + (r - 230) * 0.5;
-          if (g > 230) g = 230 + (g - 230) * 0.5;
-          if (b > 230) b = 230 + (b - 230) * 0.5;
+          // Normalize weights
+          wUnder = wUnder.clamp(0.0, 1.0);
+          wNormal = wNormal.clamp(0.0, 1.0);
+          wOver = wOver.clamp(0.0, 1.0);
+          final total = wUnder + wNormal + wOver;
+          wUnder /= total;
+          wNormal /= total;
+          wOver /= total;
 
-          // 4. Vignette
-          final dx = x - cx;
-          final dy = y - cy;
-          final distSq = dx * dx + dy * dy;
-          final vignette = 1.0 - (distSq / maxDistSq) * 0.35;
-          r *= vignette;
-          g *= vignette;
-          b *= vignette;
+          // Blend
+          final finalR = (ur * wUnder + r * wNormal + or_ * wOver).round().clamp(0, 255);
+          final finalG = (ug * wUnder + g * wNormal + og * wOver).round().clamp(0, 255);
+          final finalB = (ub * wUnder + b * wNormal + ob * wOver).round().clamp(0, 255);
 
-          image.setPixelRgb(
-            x, y,
-            r.round().clamp(0, 255),
-            g.round().clamp(0, 255),
-            b.round().clamp(0, 255),
-          );
+          image.setPixelRgb(x, y, finalR, finalG, finalB);
         }
       }
 
-      // 5. Letterbox — 2.35:1 cinemascope bars
-      if (letterbox) {
-        final currentAspect = w / h;
-        const targetAspect = 2.35;
+      // Konting contrast + saturation boost para pop
+      final adjusted = img.adjustColor(image, contrast: 1.05, saturation: 1.08);
 
-        if (currentAspect < targetAspect) {
-          final targetH = (w / targetAspect).round();
-          final barH = ((h - targetH) / 2).round();
-
-          for (int y = 0; y < barH; y++) {
-            for (int x = 0; x < w; x++) {
-              image.setPixelRgb(x, y, 0, 0, 0);
-            }
-          }
-          for (int y = h - barH; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-              image.setPixelRgb(x, y, 0, 0, 0);
-            }
-          }
-        }
-      }
-
-      final jpg = img.encodeJpg(image, quality: 92);
-      final newPath = jpegPath.replaceFirst('.jpg', '_cine.jpg');
+      final jpg = img.encodeJpg(adjusted, quality: 92);
+      final newPath = jpegPath.replaceFirst('.jpg', '_hdr.jpg');
       await File(newPath).writeAsBytes(jpg);
       return newPath;
     } catch (e) {
-      print('Cinematic grade error: $e');
+      print('HDR error: $e');
       return null;
     }
   }

@@ -6,12 +6,12 @@ class ControlsOverlay extends StatelessWidget {
   final String shutterSpeed, aspectRatio, flashMode;
   final List<double> shutterSpeedValues;
   final List<String> aspectRatios;
-  final bool isHDREnabled, isRawEnabled, isCineEnabled, isCapturing;
-  final int uiOrientation; // 0=portrait, 1=landscapeRight, 2=upsideDown, 3=landscapeLeft
+  final bool isHDREnabled, isRawEnabled, isHdrPlusEnabled, isCapturing;
+  final int uiOrientation;
   final bool showISOSlider, showEVSlider, showShutterPicker, showFocusSlider, showZoomSlider;
   final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
-  final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleCine;
+  final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleHdrPlus;
   final VoidCallback onToggleISOSlider, onToggleEVSlider, onToggleShutterPicker, onToggleFocusSlider, onToggleZoomSlider;
   final VoidCallback onCloseAllPopups;
 
@@ -31,7 +31,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.flashMode,
     required this.isHDREnabled,
     required this.isRawEnabled,
-    required this.isCineEnabled,
+    required this.isHdrPlusEnabled,
     required this.isCapturing,
     required this.uiOrientation,
     required this.onISOChanged,
@@ -44,7 +44,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onCapture,
     required this.onToggleHDR,
     required this.onToggleRAW,
-    required this.onToggleCine,
+    required this.onToggleHdrPlus,
     required this.showISOSlider,
     required this.onToggleISOSlider,
     required this.showEVSlider,
@@ -61,21 +61,15 @@ class ControlsOverlay extends StatelessWidget {
   bool get _anyPopupOpen =>
       showISOSlider || showEVSlider || showShutterPicker || showFocusSlider || showZoomSlider;
 
-  /// Convert orientation code to rotation angle (radians).
-  /// Portrait UI = 0°, so:
-  /// - Landscape right (phone rotated CW) → icons rotate +90° (CCW visually)
-  /// - Upside down → 180°
-  /// - Landscape left → -90°
   double get _rotationAngle {
     switch (uiOrientation) {
-      case 1: return -math.pi / 2;   // landscape right → rotate icons CCW
-      case 2: return math.pi;         // upside down
-      case 3: return math.pi / 2;    // landscape left → rotate icons CW
-      default: return 0;              // portrait
+      case 1: return -math.pi / 2;
+      case 2: return math.pi;
+      case 3: return math.pi / 2;
+      default: return 0;
     }
   }
 
-  /// Wrap any widget sa smooth rotation animation
   Widget _rotate(Widget child) {
     return AnimatedRotation(
       turns: _rotationAngle / (2 * math.pi),
@@ -149,12 +143,13 @@ class ControlsOverlay extends StatelessWidget {
             )),
           ),
           const SizedBox(width: 6),
+          // === BAGONG HDR+ PILL (green kapag ON, kasing color ng photography HDR icon) ===
           GestureDetector(
-            onTap: onToggleCine,
+            onTap: onToggleHdrPlus,
             child: _rotate(_pill(
-              icon: Icons.movie_filter,
-              label: 'CINE',
-              color: isCineEnabled ? Colors.deepOrangeAccent : Colors.grey,
+              icon: Icons.hdr_on,
+              label: 'HDR+',
+              color: isHdrPlusEnabled ? Colors.greenAccent : Colors.grey,
             )),
           ),
           const SizedBox(width: 6),
@@ -291,7 +286,7 @@ class ControlsOverlay extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: isCineEnabled ? Colors.deepOrangeAccent : Colors.white,
+                  color: isHdrPlusEnabled ? Colors.greenAccent : Colors.white,
                   width: 4,
                 ),
                 color: isCapturing ? Colors.white38 : Colors.white,
@@ -307,7 +302,7 @@ class ControlsOverlay extends StatelessWidget {
                         height: 63,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isCineEnabled ? Colors.deepOrangeAccent : Colors.white,
+                          color: isHdrPlusEnabled ? Colors.greenAccent : Colors.white,
                         )),
               ),
             ),
