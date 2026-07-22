@@ -15,6 +15,7 @@ class CameraManager: NSObject {
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
     private var isHDREnabled = false
     private var isRawEnabled = false
+    private var isNatural48Enabled = false
     private var flashMode: AVCaptureDevice.FlashMode = .off
     private var lastPhotoCompletion: ((Result<[String: String], Error>) -> Void)?
 
@@ -25,6 +26,7 @@ class CameraManager: NSObject {
     private var captureError: Error?
 
     private var softwareZoomFactor: CGFloat = 1.0
+    private let natural48ZoomFactor: CGFloat = 756.0 / 409.0
 
     private let motionManager = CMMotionManager()
     private var currentPhysicalOrientation: UIDeviceOrientation = .portrait
@@ -253,8 +255,56 @@ class CameraManager: NSObject {
         }
     }
 
+    func setNatural48Mode(_ enabled: Bool, completion: @escaping (Bool) -> Void) {
+        guard let d = device else { completion(false); return }
+
+        sessionQueue.async {
+            do {
+                try d.lockForConfiguration()
+
+                self.isNatural48Enabled = enabled
+                self.isRawEnabled = false
+
+                if enabled {
+                    let zoom = max(
+                        1.0,
+                        min(self.natural48ZoomFactor, d.activeFormat.videoMaxZoomFactor)
+                    )
+                    self.softwareZoomFactor = zoom
+                    d.videoZoomFactor = zoom
+
+                    if d.isExposureModeSupported(.continuousAutoExposure) {
+                        d.exposureMode = .continuousAutoExposure
+                    }
+                    if d.isFocusModeSupported(.continuousAutoFocus) {
+                        d.focusMode = .continuousAutoFocus
+                    }
+                    if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                        d.whiteBalanceMode = .continuousAutoWhiteBalance
+                    }
+                    if d.minExposureTargetBias <= 0 && d.maxExposureTargetBias >= 0 {
+                        d.setExposureTargetBias(0, completionHandler: nil)
+                    }
+                    d.isSubjectAreaChangeMonitoringEnabled = true
+                    self.flashMode = .off
+                    self.isHDREnabled = false
+                } else {
+                    self.softwareZoomFactor = 1.0
+                    d.videoZoomFactor = 1.0
+                }
+
+                d.unlockForConfiguration()
+                completion(true)
+            } catch {
+                print("⚠️ 48mm Natural mode error: \(error)")
+                completion(false)
+            }
+        }
+    }
+
     func setRAW(_ enabled: Bool) {
         isRawEnabled = enabled
+        if enabled { isNatural48Enabled = false }
         guard let d = device else { return }
 
         sessionQueue.async {
@@ -319,13 +369,25 @@ class CameraManager: NSObject {
                 settings.isHighResolutionPhotoEnabled = false
                 settings.isAutoStillImageStabilizationEnabled = false
             } else {
-                settings = AVCapturePhotoSettings()
+                if self.isNatural48Enabled {
+                    // Keep Apple's native ISP JPEG pipeline and metadata. Setting
+                    // videoZoomFactor produces the 48mm-equivalent center crop while
+                    // high-resolution capture preserves 4032x3024 output dimensions.
+                    settings = AVCapturePhotoSettings(
+                        format: [AVVideoCodecKey: AVVideoCodecType.jpeg]
+                    )
+                } else {
+                    settings = AVCapturePhotoSettings()
+                }
                 self.expectedPhotoCount = 1
                 settings.isHighResolutionPhotoEnabled = true
                 if #available(iOS 13.0, *) {
-                    settings.photoQualityPrioritization = .balanced
+                    settings.photoQualityPrioritization = self.isNatural48Enabled
+                        ? .quality
+                        : .balanced
                 }
-                settings.isAutoStillImageStabilizationEnabled = self.isHDREnabled
+                settings.isAutoStillImageStabilizationEnabled =
+                    self.isNatural48Enabled || self.isHDREnabled
             }
 
             if let d = self.device, d.hasFlash {

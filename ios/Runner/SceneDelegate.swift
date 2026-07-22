@@ -67,6 +67,9 @@ class SceneDelegate: FlutterSceneDelegate {
                     result(FlutterError(code: "ARG", message: "factor required", details: nil)); return
                 }
                 mgr.setZoom(CGFloat(z)) { ok in result(ok) }
+            case "setNatural48Mode":
+                let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
+                mgr.setNatural48Mode(enabled) { ok in result(ok) }
             case "setFlashMode":
                 let mode = (call.arguments as? [String: Any])?["mode"] as? String ?? "off"
                 mgr.setFlashMode(mode)

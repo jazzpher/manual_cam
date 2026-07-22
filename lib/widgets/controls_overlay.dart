@@ -9,7 +9,7 @@ class ControlsOverlay extends StatelessWidget {
   final String shutterSpeed, aspectRatio, flashMode;
   final List<double> shutterSpeedValues;
   final List<String> aspectRatios;
-  final bool isHDREnabled, isRawEnabled, isCapturing;
+  final bool isHDREnabled, isRawEnabled, isNatural48Enabled, isCapturing;
   final int uiOrientation;
   final SettingType activeDial;
   final Function(double) onISOChanged,
@@ -19,7 +19,7 @@ class ControlsOverlay extends StatelessWidget {
       onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
   final Function(SettingType) onSelectDial;
-  final VoidCallback onCapture, onToggleHDR, onToggleRAW;
+  final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleNatural48;
 
   const ControlsOverlay({
     super.key,
@@ -37,6 +37,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.flashMode,
     required this.isHDREnabled,
     required this.isRawEnabled,
+    required this.isNatural48Enabled,
     required this.isCapturing,
     required this.uiOrientation,
     required this.activeDial,
@@ -51,6 +52,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onCapture,
     required this.onToggleHDR,
     required this.onToggleRAW,
+    required this.onToggleNatural48,
   });
 
   double get _rotationAngle {
@@ -139,6 +141,17 @@ class ControlsOverlay extends StatelessWidget {
               _pill(
                 label: 'RAW',
                 color: isRawEnabled ? Colors.amber : Colors.grey,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: onToggleNatural48,
+            child: _rotate(
+              _pill(
+                icon: Icons.camera_alt_outlined,
+                label: '48MM',
+                color: isNatural48Enabled ? Colors.amber : Colors.grey,
               ),
             ),
           ),
@@ -233,28 +246,34 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.shutter,
             label: 'SHUTTER',
-            value: shutterSpeed,
+            value: isNatural48Enabled ? 'AUTO' : shutterSpeed,
+            enabled: !isNatural48Enabled,
           ),
           _pickerButton(
             type: SettingType.iso,
             label: 'ISO',
-            value: iso.toInt().toString(),
+            value: isNatural48Enabled ? 'AUTO' : iso.toInt().toString(),
+            enabled: !isNatural48Enabled,
           ),
           _pickerButton(
             type: SettingType.ev,
             label: 'EV',
-            value:
-                '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
+            value: isNatural48Enabled
+                ? 'AUTO'
+                : '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
+            enabled: !isNatural48Enabled,
           ),
           _pickerButton(
             type: SettingType.focus,
             label: 'FOCUS',
-            value: focus.toStringAsFixed(2),
+            value: isNatural48Enabled ? 'AF' : focus.toStringAsFixed(2),
+            enabled: !isNatural48Enabled,
           ),
           _pickerButton(
             type: SettingType.zoom,
             label: 'ZOOM',
-            value: '${zoom.toStringAsFixed(1)}x',
+            value: isNatural48Enabled ? '48mm' : '${zoom.toStringAsFixed(1)}x',
+            enabled: !isNatural48Enabled,
           ),
         ],
       ),
@@ -265,13 +284,16 @@ class ControlsOverlay extends StatelessWidget {
     required SettingType type,
     required String label,
     required String value,
+    bool enabled = true,
   }) {
-    final isActive = activeDial == type;
+    final isActive = enabled && activeDial == type;
     return GestureDetector(
-      onTap: () {
-        // Tap toggle: if same active, close; else switch
-        onSelectDial(isActive ? SettingType.none : type);
-      },
+      onTap: enabled
+          ? () {
+              // Tap toggle: if same active, close; else switch.
+              onSelectDial(isActive ? SettingType.none : type);
+            }
+          : null,
       behavior: HitTestBehavior.opaque,
       child: _rotate(
         Container(
@@ -292,7 +314,11 @@ class ControlsOverlay extends StatelessWidget {
               Text(
                 value,
                 style: TextStyle(
-                  color: isActive ? Colors.amber : Colors.white,
+                  color: !enabled
+                      ? Colors.white54
+                      : isActive
+                      ? Colors.amber
+                      : Colors.white,
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
                   fontFamily: 'monospace',
@@ -302,7 +328,11 @@ class ControlsOverlay extends StatelessWidget {
               Text(
                 label,
                 style: TextStyle(
-                  color: isActive ? Colors.amber : Colors.grey,
+                  color: !enabled
+                      ? Colors.white38
+                      : isActive
+                      ? Colors.amber
+                      : Colors.grey,
                   fontSize: 8,
                   fontWeight: FontWeight.w600,
                 ),
@@ -411,7 +441,7 @@ class ControlsOverlay extends StatelessWidget {
               value: currentValue,
               min: minValue,
               max: maxValue,
-              divisions: divisions ?? 100,
+              divisions: divisions,
               onChanged: callback,
             ),
           ),

@@ -51,13 +51,14 @@ class _CameraScreenState extends State<CameraScreen> {
   double _minISO = 24;
   double _maxISO = 3200;
   String _shutterSpeed = '1/60';
-  double _shutterSeconds = 1 / 60;
   double _exposureBias = 0.0;
   double _zoom = 1.0;
+  static const double _natural48Zoom = 756 / 409;
   double _maxZoom = 10.0;
   double _focus = 0.5;
   bool _isHDREnabled = false;
   bool _isRawEnabled = false;
+  bool _isNatural48Enabled = false;
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
@@ -113,7 +114,9 @@ class _CameraScreenState extends State<CameraScreen> {
         if (code != _uiOrientation && mounted) {
           setState(() => _uiOrientation = code);
         }
-      } catch (e) {}
+      } catch (_) {
+        // Keep the last known orientation when the native poll is unavailable.
+      }
     });
   }
 
@@ -129,7 +132,6 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _setShutter(double sec) async {
     setState(() {
-      _shutterSeconds = sec;
       _shutterSpeed = _formatShutter(sec);
     });
     await _camera.setShutterSpeed(sec);
@@ -161,6 +163,16 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _toggleRAW() async {
+    if (_isNatural48Enabled) {
+      await _camera.setNatural48Mode(false);
+      if (mounted) {
+        setState(() {
+          _isNatural48Enabled = false;
+          _zoom = 1.0;
+        });
+      }
+    }
+
     if (!_supportsRAW) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -175,6 +187,44 @@ class _CameraScreenState extends State<CameraScreen> {
     }
     setState(() => _isRawEnabled = !_isRawEnabled);
     await _camera.setRAW(_isRawEnabled);
+  }
+
+  Future<void> _toggleNatural48() async {
+    final enable = !_isNatural48Enabled;
+    final success = await _camera.setNatural48Mode(enable);
+    if (!mounted) return;
+
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to switch 48mm Natural mode'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isNatural48Enabled = enable;
+      _isRawEnabled = false;
+      _isHDREnabled = false;
+      _flashMode = 'off';
+      _exposureBias = 0.0;
+      _zoom = enable ? _natural48Zoom : 1.0;
+      _aspectRatio = '4:3';
+      _activeDial = SettingType.none;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          enable
+              ? '48mm Natural ON · Auto AE/AF · High-quality JPEG'
+              : '48mm Natural OFF · 1x camera restored',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   // === DIAL SELECTION CALLBACK ===
@@ -232,8 +282,12 @@ class _CameraScreenState extends State<CameraScreen> {
 
   String _modeLabel() {
     final parts = <String>[];
-    if (_isRawEnabled) parts.add('RAW+JPEG');
-    else parts.add('JPEG');
+    if (_isRawEnabled) {
+      parts.add('RAW+JPEG');
+    } else {
+      parts.add('JPEG');
+    }
+    if (_isNatural48Enabled) parts.add('48MM NATURAL');
     return parts.join(' · ');
   }
 
@@ -318,6 +372,7 @@ class _CameraScreenState extends State<CameraScreen> {
             flashMode: _flashMode,
             isHDREnabled: _isHDREnabled,
             isRawEnabled: _isRawEnabled,
+            isNatural48Enabled: _isNatural48Enabled,
             isCapturing: _isCapturing,
             uiOrientation: _uiOrientation,
             activeDial: _activeDial,
@@ -332,6 +387,7 @@ class _CameraScreenState extends State<CameraScreen> {
             onCapture: _capturePhoto,
             onToggleHDR: _toggleHDR,
             onToggleRAW: _toggleRAW,
+            onToggleNatural48: _toggleNatural48,
           ),
 
           Positioned(

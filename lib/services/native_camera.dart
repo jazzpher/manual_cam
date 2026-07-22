@@ -69,6 +69,19 @@ class NativeCamera {
     catch (e) { print('setZoom error: $e'); }
   }
 
+  Future<bool> setNatural48Mode(bool enabled) async {
+    try {
+      final result = await _channel.invokeMethod(
+        'setNatural48Mode',
+        {'enabled': enabled},
+      );
+      return result == true;
+    } catch (e) {
+      print('setNatural48Mode error: $e');
+      return false;
+    }
+  }
+
   Future<void> setFlashMode(String mode) async {
     try { await _channel.invokeMethod('setFlashMode', {'mode': mode}); }
     catch (e) { print('setFlashMode error: $e'); }
