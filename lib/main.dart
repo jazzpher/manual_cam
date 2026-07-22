@@ -1,10 +1,18 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'services/native_camera.dart';
 import 'widgets/camera_preview.dart';
 import 'widgets/controls_overlay.dart';
 
 void main() {
-  runApp(const ManualCamApp());
+  WidgetsFlutterBinding.ensureInitialized();
+
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]).then((_) {
+    runApp(const ManualCamApp());
+  });
 }
 
 class ManualCamApp extends StatelessWidget {
@@ -50,7 +58,7 @@ class _CameraScreenState extends State<CameraScreen> {
   double _focus = 0.5;
   bool _isHDREnabled = false;
   bool _isRawEnabled = false;
-  bool _isCineEnabled = false; // === BAGO: Cinematic mode ===
+  bool _isCineEnabled = false;
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
@@ -64,6 +72,9 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Offset? _tapFocusPoint;
 
+  int _uiOrientation = 0;
+  Timer? _orientationPollTimer;
+
   final List<double> _shutterSpeedValues = [
     1 / 8000, 1 / 4000, 1 / 2000, 1 / 1000, 1 / 500, 1 / 250,
     1 / 125, 1 / 60, 1 / 30, 1 / 15, 1 / 8, 1 / 4, 1 / 2,
@@ -76,6 +87,7 @@ class _CameraScreenState extends State<CameraScreen> {
   void initState() {
     super.initState();
     _initCamera();
+    _startOrientationPolling();
   }
 
   Future<void> _initCamera() async {
@@ -95,6 +107,17 @@ class _CameraScreenState extends State<CameraScreen> {
         _statusMessage = 'Camera init failed:\n$e\n\nPlease grant camera permission in Settings.';
       });
     }
+  }
+
+  void _startOrientationPolling() {
+    _orientationPollTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
+      try {
+        final code = await _camera.getCurrentOrientationCode();
+        if (code != _uiOrientation && mounted) {
+          setState(() => _uiOrientation = code);
+        }
+      } catch (e) {}
+    });
   }
 
   String _formatShutter(double s) {
@@ -157,7 +180,6 @@ class _CameraScreenState extends State<CameraScreen> {
     await _camera.setRAW(_isRawEnabled);
   }
 
-  // === BAGONG TOGGLE: CINEMATIC MODE ===
   void _toggleCine() {
     setState(() {
       _isCineEnabled = !_isCineEnabled;
@@ -189,7 +211,6 @@ class _CameraScreenState extends State<CameraScreen> {
     if (_isCapturing) return;
     setState(() => _isCapturing = true);
 
-    // Cinematic mode ay medyo matagal (~1-2 sec para sa processing)
     if (_isCineEnabled && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -257,6 +278,12 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   @override
+  void dispose() {
+    _orientationPollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (!_isInitialized) {
       return Scaffold(
@@ -298,9 +325,6 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
 
-          // === CINEMATIC LETTERBOX OVERLAY sa preview ===
-          // Kapag naka-CINE mode, mag-show ng 2.35:1 letterbox preview bars
-          // para makita ng user kung anong porma ng final capture
           if (_isCineEnabled)
             Positioned.fill(
               child: IgnorePointer(
@@ -308,7 +332,6 @@ class _CameraScreenState extends State<CameraScreen> {
                   builder: (context, constraints) {
                     final w = constraints.maxWidth;
                     final h = constraints.maxHeight;
-                    // Sa 2.35:1, ang visible height = w / 2.35
                     final visibleH = w / 2.35;
                     final barH = ((h - visibleH) / 2).clamp(0.0, h / 2);
                     return Column(
@@ -323,8 +346,7 @@ class _CameraScreenState extends State<CameraScreen> {
               ),
             ),
 
-          if (_tapFocusPoint != null)
-            _buildFocusReticle(_tapFocusPoint!),
+          if (_tapFocusPoint != null) _buildFocusReticle(_tapFocusPoint!),
 
           Positioned(
             bottom: 0,
@@ -359,6 +381,7 @@ class _CameraScreenState extends State<CameraScreen> {
             isRawEnabled: _isRawEnabled,
             isCineEnabled: _isCineEnabled,
             isCapturing: _isCapturing,
+            uiOrientation: _uiOrientation,
             onISOChanged: _setISO,
             onShutterSpeedChanged: _setShutter,
             onExposureBiasChanged: _setEV,
