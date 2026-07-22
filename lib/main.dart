@@ -49,6 +49,8 @@ class _CameraScreenState extends State<CameraScreen> {
   double _maxZoom = 10.0;
   double _focus = 0.5;
   bool _isHDREnabled = false;
+  bool _isRawEnabled = false;
+  bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
   bool _isCapturing = false;
@@ -82,6 +84,7 @@ class _CameraScreenState extends State<CameraScreen> {
         _minISO = _camera.minISO;
         _maxISO = _camera.maxISO;
         _maxZoom = _camera.maxZoom;
+        _supportsRAW = _camera.supportsRAW;
         _iso = _iso.clamp(_minISO, _maxISO);
         _isInitialized = true;
         _statusMessage = '';
@@ -136,6 +139,23 @@ class _CameraScreenState extends State<CameraScreen> {
     await _camera.setHDR(_isHDREnabled);
   }
 
+  Future<void> _toggleRAW() async {
+    if (!_supportsRAW) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ RAW not supported on this device'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+    setState(() => _isRawEnabled = !_isRawEnabled);
+    await _camera.setRAW(_isRawEnabled);
+  }
+
   Future<void> _onPreviewTap(double x, double y) async {
     setState(() {
       _tapFocusPoint = Offset(x, y);
@@ -151,11 +171,16 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() => _isCapturing = true);
 
     try {
-      await _camera.capturePhoto();
+      final paths = await _camera.capturePhoto();
       if (mounted) {
+        final hasRaw = paths.containsKey('raw');
+        final message = hasRaw
+            ? '📸 RAW + JPEG saved to Photos'
+            : '📸 JPEG saved to Photos';
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('📸 Saved to Photos (album: ManualCam)'),
+            content: Text(message),
             backgroundColor: Colors.green.shade700,
             duration: const Duration(seconds: 2),
           ),
@@ -259,6 +284,7 @@ class _CameraScreenState extends State<CameraScreen> {
             aspectRatios: _aspectRatios,
             flashMode: _flashMode,
             isHDREnabled: _isHDREnabled,
+            isRawEnabled: _isRawEnabled,
             isCapturing: _isCapturing,
             onISOChanged: _setISO,
             onShutterSpeedChanged: _setShutter,
@@ -269,6 +295,7 @@ class _CameraScreenState extends State<CameraScreen> {
             onFlashModeChanged: _setFlash,
             onCapture: _capturePhoto,
             onToggleHDR: _toggleHDR,
+            onToggleRAW: _toggleRAW,
             onCloseAllPopups: _closeAllPopups,
             showISOSlider: _showISOSlider,
             onToggleISOSlider: () {
@@ -312,7 +339,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                '$_aspectRatio · NATIVE',
+                _isRawEnabled ? '$_aspectRatio · RAW+JPEG' : '$_aspectRatio · JPEG',
                 style: const TextStyle(
                   color: Colors.amber,
                   fontSize: 10,

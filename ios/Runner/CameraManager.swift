@@ -3,7 +3,6 @@ import UIKit
 import Flutter
 import Photos
 
-/// Native AVFoundation-based camera manager na binibigay ng true manual controls.
 class CameraManager: NSObject {
     static let shared = CameraManager()
 
@@ -13,10 +12,15 @@ class CameraManager: NSObject {
     private var photoOutput = AVCapturePhotoOutput()
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
     private var isHDREnabled = false
+    private var isRawEnabled = false
     private var flashMode: AVCaptureDevice.FlashMode = .off
-    private var lastPhotoCompletion: ((Result<String, Error>) -> Void)?
+    private var lastPhotoCompletion: ((Result<[String: String], Error>) -> Void)?
 
-    // MARK: - Setup
+    private var pendingRawURL: String?
+    private var pendingJpegURL: String?
+    private var expectedPhotoCount: Int = 1
+    private var receivedPhotoCount: Int = 0
+    private var captureError: Error?
 
     func setup(completion: @escaping (Result<[String: Any], Error>) -> Void) {
         sessionQueue.async {
@@ -42,8 +46,6 @@ class CameraManager: NSObject {
                     self.session.addOutput(self.photoOutput)
                     self.photoOutput.isHighResolutionCaptureEnabled = true
 
-                    // === SPEED OPTIMIZATION ===
-                    // Prioritize speed over quality (huge difference sa capture time)
                     if #available(iOS 13.0, *) {
                         self.photoOutput.maxPhotoQualityPrioritization = .balanced
                     }
@@ -62,6 +64,8 @@ class CameraManager: NSObject {
 
     func getCapabilities() -> [String: Any] {
         guard let d = device else { return [:] }
+        let rawSupported = !photoOutput.availableRawPhotoPixelFormatTypes.isEmpty
+
         return [
             "minISO": d.activeFormat.minISO,
             "maxISO": d.activeFormat.maxISO,
@@ -72,10 +76,9 @@ class CameraManager: NSObject {
             "supportsHDR": d.activeFormat.isVideoHDRSupported,
             "supportsFocus": d.isFocusModeSupported(.locked),
             "supportsExposure": d.isExposureModeSupported(.custom),
+            "supportsRAW": rawSupported,
         ]
     }
-
-    // MARK: - Manual Controls
 
     func setISO(_ iso: Float, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
@@ -198,72 +201,110 @@ class CameraManager: NSObject {
         isHDREnabled = enabled
     }
 
-    // MARK: - Capture (OPTIMIZED for speed)
+    func setRAW(_ enabled: Bool) {
+        isRawEnabled = enabled
+    }
 
-    func capturePhoto(completion: @escaping (Result<String, Error>) -> Void) {
+    func capturePhoto(completion: @escaping (Result<[String: String], Error>) -> Void) {
         sessionQueue.async {
-            let settings = AVCapturePhotoSettings()
+            self.pendingRawURL = nil
+            self.pendingJpegURL = nil
+            self.receivedPhotoCount = 0
+            self.captureError = nil
+            self.lastPhotoCompletion = completion
 
-            // === SPEED OPTIMIZATIONS ===
+            let settings: AVCapturePhotoSettings
+
+            if self.isRawEnabled,
+               let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first {
+                let processedFormat: [String: Any] = [
+                    AVVideoCodecKey: AVVideoCodecType.jpeg
+                ]
+                settings = AVCapturePhotoSettings(
+                    rawPixelFormatType: rawFormat,
+                    processedFormat: processedFormat
+                )
+                self.expectedPhotoCount = 2
+                print("📸 RAW+JPEG capture")
+            } else {
+                settings = AVCapturePhotoSettings()
+                self.expectedPhotoCount = 1
+                print("📸 JPEG-only capture")
+            }
+
             settings.isHighResolutionPhotoEnabled = true
 
             if #available(iOS 13.0, *) {
-                // .balanced ay mas mabilis kaysa .quality
-                // .speed ay pinakamabilis pero maliit ang resolution
                 settings.photoQualityPrioritization = .balanced
             }
 
-            // Disable auto features na nag-a-add ng delay
-            settings.isAutoStillImageStabilizationEnabled = false
+            settings.isAutoStillImageStabilizationEnabled = self.isRawEnabled || self.isHDREnabled
 
-            // Flash setting
             if let d = self.device, d.hasFlash {
                 settings.flashMode = self.flashMode
             }
 
-            // HDR — sa iOS built into photo output, medyo dagdag delay
-            // Kung enabled, wag i-disable stabilization
-            if self.isHDREnabled {
-                settings.isAutoStillImageStabilizationEnabled = true
-            }
-
-            self.lastPhotoCompletion = completion
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
 }
 
-// MARK: - Photo capture delegate
 extension CameraManager: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput,
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
         if let error = error {
-            DispatchQueue.main.async {
-                self.lastPhotoCompletion?(.failure(error))
-            }
+            captureError = error
+            checkAndComplete()
             return
         }
-        guard let data = photo.fileDataRepresentation() else {
-            DispatchQueue.main.async {
-                self.lastPhotoCompletion?(.failure(NSError(domain: "Camera", code: 2,
-                    userInfo: [NSLocalizedDescriptionKey: "No photo data"])))
-            }
+
+        let isRawPhoto = photo.isRawPhoto
+        let data = photo.fileDataRepresentation()
+        let ext = isRawPhoto ? "dng" : "jpg"
+
+        guard let photoData = data else {
+            captureError = NSError(domain: "Camera", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "No photo data"])
+            checkAndComplete()
             return
         }
 
         let tmpDir = NSTemporaryDirectory()
-        let filename = "manualcam_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let filename = "manualcam_\(timestamp).\(ext)"
         let filePath = (tmpDir as NSString).appendingPathComponent(filename)
 
         do {
-            try data.write(to: URL(fileURLWithPath: filePath))
-            DispatchQueue.main.async {
-                self.lastPhotoCompletion?(.success(filePath))
+            try photoData.write(to: URL(fileURLWithPath: filePath))
+            if isRawPhoto {
+                pendingRawURL = filePath
+                print("✅ RAW (DNG) saved: \(filePath)")
+            } else {
+                pendingJpegURL = filePath
+                print("✅ JPEG saved: \(filePath)")
             }
         } catch {
+            captureError = error
+        }
+
+        checkAndComplete()
+    }
+
+    private func checkAndComplete() {
+        receivedPhotoCount += 1
+
+        if receivedPhotoCount >= expectedPhotoCount || captureError != nil {
             DispatchQueue.main.async {
-                self.lastPhotoCompletion?(.failure(error))
+                if let error = self.captureError {
+                    self.lastPhotoCompletion?(.failure(error))
+                } else {
+                    var paths: [String: String] = [:]
+                    if let jpeg = self.pendingJpegURL { paths["jpeg"] = jpeg }
+                    if let raw = self.pendingRawURL { paths["raw"] = raw }
+                    self.lastPhotoCompletion?(.success(paths))
+                }
+                self.lastPhotoCompletion = nil
             }
         }
     }

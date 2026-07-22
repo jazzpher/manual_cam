@@ -8,7 +8,6 @@ class SceneDelegate: FlutterSceneDelegate {
                         options connectionOptions: UIScene.ConnectionOptions) {
         super.scene(scene, willConnectTo: session, options: connectionOptions)
 
-        // Kunin ang FlutterViewController mula sa window (safe na dito, hindi nil).
         guard let windowScene = scene as? UIWindowScene,
               let window = windowScene.windows.first,
               let controller = window.rootViewController as? FlutterViewController else {
@@ -76,13 +75,19 @@ class SceneDelegate: FlutterSceneDelegate {
                 let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
                 mgr.setHDR(enabled)
                 result(true)
+            case "setRAW":
+                let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
+                mgr.setRAW(enabled)
+                result(true)
             case "capturePhoto":
                 mgr.capturePhoto { r in
                     switch r {
-                    case .success(let path): result(path)
-                    case .failure(let e): result(FlutterError(code: "CAPTURE_FAIL",
-                                                              message: e.localizedDescription,
-                                                              details: nil))
+                    case .success(let paths):
+                        result(paths)
+                    case .failure(let e):
+                        result(FlutterError(code: "CAPTURE_FAIL",
+                                            message: e.localizedDescription,
+                                            details: nil))
                     }
                 }
             default:

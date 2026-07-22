@@ -3,7 +3,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:gal/gal.dart';
 
 /// Bridge sa native iOS AVFoundation camera.
-/// Naga-access ng TRUE manual controls (ISO, shutter, focus, HDR).
 class NativeCamera {
   static const _channel = MethodChannel('manual_cam/camera');
 
@@ -19,11 +18,11 @@ class NativeCamera {
   double get maxShutter => (_capabilities['maxExposureDuration'] as num?)?.toDouble() ?? 1.0;
   double get maxZoom => (_capabilities['maxZoom'] as num?)?.toDouble() ?? 10.0;
   bool get supportsHDR => _capabilities['supportsHDR'] as bool? ?? false;
+  bool get supportsRAW => _capabilities['supportsRAW'] as bool? ?? false;
 
   Future<void> initialize() async {
     if (_initialized) return;
 
-    // Request camera permission via Dart side
     final camStatus = await Permission.camera.request();
     if (!camStatus.isGranted) {
       throw Exception('Camera permission denied');
@@ -104,25 +103,55 @@ class NativeCamera {
     }
   }
 
-  /// Capture at save sa Photos app. Returns file path.
-  Future<String> capturePhoto() async {
+  Future<void> setRAW(bool enabled) async {
     try {
-      final String? path = await _channel.invokeMethod<String>('capturePhoto');
-      if (path == null) throw Exception('Capture returned null');
+      await _channel.invokeMethod('setRAW', {'enabled': enabled});
+    } catch (e) {
+      print('setRAW error: $e');
+    }
+  }
 
-      // Save to Photos app
+  /// Capture at save sa Photos app.
+  /// Returns map: {'jpeg': path, 'raw': path (optional)}
+  Future<Map<String, String>> capturePhoto() async {
+    try {
+      final result = await _channel.invokeMethod('capturePhoto');
+      if (result == null) throw Exception('Capture returned null');
+
+      final Map<String, String> paths = {};
+      if (result is Map) {
+        result.forEach((k, v) {
+          if (k is String && v is String) {
+            paths[k] = v;
+          }
+        });
+      }
+
+      if (paths.isEmpty) throw Exception('No files created');
+
+      // Save each file to Photos app
       try {
         final hasAccess = await Gal.hasAccess(toAlbum: true);
         if (!hasAccess) {
           await Gal.requestAccess(toAlbum: true);
         }
-        await Gal.putImage(path, album: 'ManualCam');
-        print('✅ Saved to Photos app: $path');
+
+        // Save JPEG (viewable sa Photos)
+        if (paths['jpeg'] != null) {
+          await Gal.putImage(paths['jpeg']!, album: 'ManualCam');
+          print('✅ JPEG saved to Photos: ${paths['jpeg']}');
+        }
+
+        // Save DNG/RAW (Photos supports DNG since iOS 10)
+        if (paths['raw'] != null) {
+          await Gal.putImage(paths['raw']!, album: 'ManualCam');
+          print('✅ RAW/DNG saved to Photos: ${paths['raw']}');
+        }
       } catch (e) {
         print('❌ Photos save error: $e');
       }
 
-      return path;
+      return paths;
     } on PlatformException catch (e) {
       throw Exception('Capture failed: ${e.message}');
     }

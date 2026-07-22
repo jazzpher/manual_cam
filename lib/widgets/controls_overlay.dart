@@ -5,11 +5,11 @@ class ControlsOverlay extends StatelessWidget {
   final String shutterSpeed, aspectRatio, flashMode;
   final List<double> shutterSpeedValues;
   final List<String> aspectRatios;
-  final bool isHDREnabled, isCapturing;
+  final bool isHDREnabled, isRawEnabled, isCapturing;
   final bool showISOSlider, showEVSlider, showShutterPicker, showFocusSlider, showZoomSlider;
   final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
-  final VoidCallback onCapture, onToggleHDR;
+  final VoidCallback onCapture, onToggleHDR, onToggleRAW;
   final VoidCallback onToggleISOSlider, onToggleEVSlider, onToggleShutterPicker, onToggleFocusSlider, onToggleZoomSlider;
   final VoidCallback onCloseAllPopups;
 
@@ -28,6 +28,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.aspectRatios,
     required this.flashMode,
     required this.isHDREnabled,
+    required this.isRawEnabled,
     required this.isCapturing,
     required this.onISOChanged,
     required this.onShutterSpeedChanged,
@@ -38,6 +39,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onFlashModeChanged,
     required this.onCapture,
     required this.onToggleHDR,
+    required this.onToggleRAW,
     required this.showISOSlider,
     required this.onToggleISOSlider,
     required this.showEVSlider,
@@ -58,7 +60,6 @@ class ControlsOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // === Tap-outside-to-dismiss backdrop (only when popup is open) ===
         if (_anyPopupOpen)
           Positioned.fill(
             child: GestureDetector(
@@ -68,7 +69,6 @@ class ControlsOverlay extends StatelessWidget {
             ),
           ),
 
-        // === Main controls (top bar + settings + bottom) ===
         SafeArea(
           child: Column(
             children: [
@@ -82,7 +82,6 @@ class ControlsOverlay extends StatelessWidget {
           ),
         ),
 
-        // === Popups (rendered ON TOP ng backdrop, so tap sa loob nila hindi mag-a-dismiss) ===
         if (showISOSlider) _buildISOSliderPopup(context),
         if (showEVSlider) _buildEVSliderPopup(context),
         if (showShutterPicker) _buildShutterPickerPopup(context),
@@ -118,6 +117,14 @@ class ControlsOverlay extends StatelessWidget {
             child: _pill(
               label: 'HDR',
               color: isHDREnabled ? Colors.amber : Colors.grey,
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: onToggleRAW,
+            child: _pill(
+              label: 'RAW',
+              color: isRawEnabled ? Colors.amber : Colors.grey,
             ),
           ),
           const Spacer(),
@@ -265,7 +272,6 @@ class ControlsOverlay extends StatelessWidget {
     );
   }
 
-  // === Reusable popup ===
   Widget _popupCard({
     required String title,
     required VoidCallback onClose,
@@ -278,7 +284,6 @@ class ControlsOverlay extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: GestureDetector(
-          // I-block yung tap-outside-to-dismiss kapag tinap sa loob ng popup
           onTap: () {},
           behavior: HitTestBehavior.opaque,
           child: Container(
@@ -299,7 +304,6 @@ class ControlsOverlay extends StatelessWidget {
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                     ),
-                    // Malaking tap area para sa X (44x44 = Apple HIG min tap size)
                     Material(
                       color: Colors.transparent,
                       child: InkWell(
@@ -312,7 +316,7 @@ class ControlsOverlay extends StatelessWidget {
                           child: Container(
                             width: 30,
                             height: 30,
-                            decoration: BoxDecoration(
+                            decoration: const BoxDecoration(
                               shape: BoxShape.circle,
                               color: Colors.white12,
                             ),
@@ -401,7 +405,7 @@ class ControlsOverlay extends StatelessWidget {
 
   Widget _buildFocusSliderPopup(BuildContext context) {
     return _popupCard(
-      title: 'Manual Focus  (0 = ∞    1 = macro)',
+      title: 'Manual Focus  (0 = infinity, 1 = macro)',
       onClose: onToggleFocusSlider,
       child: _slider(
         context: context,
