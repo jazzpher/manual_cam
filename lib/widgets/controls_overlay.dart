@@ -12,11 +12,7 @@ class ControlsOverlay extends StatelessWidget {
   final bool isHDREnabled, isRawEnabled, isHdrPlusEnabled, isCapturing;
   final int uiOrientation;
   final SettingType activeDial;
-  final Function(double) onISOChanged,
-      onShutterSpeedChanged,
-      onExposureBiasChanged,
-      onZoomChanged,
-      onFocusChanged;
+  final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
   final Function(SettingType) onSelectDial;
   final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleHdrPlus;
@@ -57,14 +53,10 @@ class ControlsOverlay extends StatelessWidget {
 
   double get _rotationAngle {
     switch (uiOrientation) {
-      case 1:
-        return -math.pi / 2;
-      case 2:
-        return math.pi;
-      case 3:
-        return math.pi / 2;
-      default:
-        return 0;
+      case 1: return -math.pi / 2;
+      case 2: return math.pi;
+      case 3: return math.pi / 2;
+      default: return 0;
     }
   }
 
@@ -87,7 +79,8 @@ class ControlsOverlay extends StatelessWidget {
           _buildAspectRatioSelector(),
           const SizedBox(height: 8),
           // === RULER DIAL (lumalabas kapag may active setting) ===
-          if (activeDial != SettingType.none) _buildRulerDial(),
+          if (activeDial != SettingType.none)
+            _buildRulerDial(),
           const SizedBox(height: 6),
           _buildSettingPicker(),
           const SizedBox(height: 12),
@@ -105,55 +98,43 @@ class ControlsOverlay extends StatelessWidget {
         children: [
           GestureDetector(
             onTap: () {
-              final next = flashMode == 'off'
-                  ? 'on'
-                  : flashMode == 'on'
-                  ? 'auto'
-                  : 'off';
+              final next = flashMode == 'off' ? 'on' : flashMode == 'on' ? 'auto' : 'off';
               onFlashModeChanged(next);
             },
-            child: _rotate(
-              _pill(
-                icon: flashMode == 'off'
-                    ? Icons.flash_off
-                    : flashMode == 'on'
-                    ? Icons.flash_on
-                    : Icons.flash_auto,
-                label: flashMode.toUpperCase(),
-                color: flashMode == 'off' ? Colors.grey : Colors.amber,
-              ),
-            ),
+            child: _rotate(_pill(
+              icon: flashMode == 'off'
+                  ? Icons.flash_off
+                  : flashMode == 'on'
+                      ? Icons.flash_on
+                      : Icons.flash_auto,
+              label: flashMode.toUpperCase(),
+              color: flashMode == 'off' ? Colors.grey : Colors.amber,
+            )),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleHDR,
-            child: _rotate(
-              _pill(
-                label: 'HDR',
-                color: isHDREnabled ? Colors.amber : Colors.grey,
-              ),
-            ),
+            child: _rotate(_pill(
+              label: 'HDR',
+              color: isHDREnabled ? Colors.amber : Colors.grey,
+            )),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleHdrPlus,
-            child: _rotate(
-              _pill(
-                icon: Icons.hdr_on,
-                label: 'HDR+',
-                color: isHdrPlusEnabled ? Colors.greenAccent : Colors.grey,
-              ),
-            ),
+            child: _rotate(_pill(
+              icon: Icons.hdr_on,
+              label: 'HDR+',
+              color: isHdrPlusEnabled ? Colors.greenAccent : Colors.grey,
+            )),
           ),
           const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleRAW,
-            child: _rotate(
-              _pill(
-                label: 'RAW',
-                color: isRawEnabled ? Colors.amber : Colors.grey,
-              ),
-            ),
+            child: _rotate(_pill(
+              label: 'RAW',
+              color: isRawEnabled ? Colors.amber : Colors.grey,
+            )),
           ),
           const Spacer(),
           _rotate(_pill(label: 'MANUAL', color: Colors.amber)),
@@ -177,14 +158,7 @@ class ControlsOverlay extends StatelessWidget {
             Icon(icon, color: color, size: 12),
             const SizedBox(width: 3),
           ],
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -201,34 +175,20 @@ class ControlsOverlay extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 3),
             child: GestureDetector(
               onTap: () => onAspectRatioChanged(ratio),
-              child: _rotate(
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Colors.amber.withOpacity(0.3)
-                        : Colors.black54,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: isSelected ? Colors.amber : Colors.white24,
-                      width: 1,
-                    ),
-                  ),
-                  child: Text(
-                    ratio,
+              child: _rotate(Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isSelected ? Colors.amber.withOpacity(0.3) : Colors.black54,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: isSelected ? Colors.amber : Colors.white24, width: 1),
+                ),
+                child: Text(ratio,
                     style: TextStyle(
                       color: isSelected ? Colors.amber : Colors.white70,
                       fontSize: 11,
-                      fontWeight: isSelected
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
-                  ),
-                ),
-              ),
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    )),
+              )),
             ),
           );
         }).toList(),
@@ -256,8 +216,7 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.ev,
             label: 'EV',
-            value:
-                '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
+            value: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
           ),
           _pickerButton(
             type: SettingType.focus,
@@ -286,44 +245,36 @@ class ControlsOverlay extends StatelessWidget {
         onSelectDial(isActive ? SettingType.none : type);
       },
       behavior: HitTestBehavior.opaque,
-      child: _rotate(
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          decoration: BoxDecoration(
-            color: isActive
-                ? Colors.amber.withOpacity(0.25)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: isActive ? Colors.amber : Colors.transparent,
-              width: 1,
-            ),
+      child: _rotate(Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: isActive ? Colors.amber.withOpacity(0.25) : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isActive ? Colors.amber : Colors.transparent,
+            width: 1,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                value,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(value,
                 style: TextStyle(
                   color: isActive ? Colors.amber : Colors.white,
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
                   fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
+                )),
+            const SizedBox(height: 2),
+            Text(label,
                 style: TextStyle(
                   color: isActive ? Colors.amber : Colors.grey,
                   fontSize: 8,
                   fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
+                )),
+          ],
         ),
-      ),
+      )),
     );
   }
 
@@ -339,9 +290,7 @@ class ControlsOverlay extends StatelessWidget {
 
     switch (activeDial) {
       case SettingType.shutter:
-        currentValue = _shutterIndex(
-          _secondsFromLabel(shutterSpeed),
-        ).toDouble();
+        currentValue = _shutterIndex(_secondsFromLabel(shutterSpeed)).toDouble();
         minValue = 0;
         maxValue = (shutterSpeedValues.length - 1).toDouble();
         label = shutterSpeed;
@@ -363,8 +312,7 @@ class ControlsOverlay extends StatelessWidget {
         currentValue = exposureBias.clamp(-4.0, 4.0);
         minValue = -4.0;
         maxValue = 4.0;
-        label =
-            '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV';
+        label = '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV';
         divisions = 32;
         callback = onExposureBiasChanged;
         break;
@@ -390,67 +338,48 @@ class ControlsOverlay extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.75),
+        color: Colors.black.withOpacity(0.78),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.amber.withOpacity(0.5), width: 1),
-      ),
-      child: _rotate(
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Current value label
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.amber,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'monospace',
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Ruler with tick marks
-            SizedBox(
-              height: 44,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  return CustomPaint(
-                    size: Size(constraints.maxWidth, 44),
-                    painter: _RulerPainter(
-                      value: currentValue,
-                      min: minValue,
-                      max: maxValue,
-                    ),
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: Colors.transparent,
-                        inactiveTrackColor: Colors.transparent,
-                        thumbColor: Colors.transparent,
-                        overlayColor: Colors.transparent,
-                        trackHeight: 40,
-                        thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 20,
-                        ),
-                        overlayShape: const RoundSliderOverlayShape(
-                          overlayRadius: 25,
-                        ),
-                      ),
-                      child: Slider(
-                        value: currentValue,
-                        min: minValue,
-                        max: maxValue,
-                        divisions: divisions,
-                        onChanged: callback,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+        border: Border.all(
+          color: Colors.amber.withOpacity(0.5),
+          width: 1,
         ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Rotate only the value label. Rotating the interactive ruler also
+          // rotates its hit-test axis, which makes landscape gestures confusing.
+          SizedBox(
+            height: 26,
+            child: Center(
+              child: _rotate(
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.amber,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 5),
+          SizedBox(
+            height: 62,
+            child: _MovingRuler(
+              value: currentValue,
+              min: minValue,
+              max: maxValue,
+              divisions: divisions ?? 100,
+              onChanged: callback,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -513,21 +442,14 @@ class ControlsOverlay extends StatelessWidget {
                     ? const SizedBox(
                         width: 24,
                         height: 24,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                     : Container(
                         width: 63,
                         height: 63,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isHdrPlusEnabled
-                              ? Colors.greenAccent
-                              : Colors.white,
-                        ),
-                      ),
+                          color: isHdrPlusEnabled ? Colors.greenAccent : Colors.white,
+                        )),
               ),
             ),
           ),
@@ -539,70 +461,215 @@ class ControlsOverlay extends StatelessWidget {
   }
 }
 
-// === CUSTOM PAINTER FOR RULER TICKS ===
-class _RulerPainter extends CustomPainter {
+// === CAMERA-STYLE MOVING RULER ===
+// The amber marker stays fixed while the scale moves underneath it.
+class _MovingRuler extends StatefulWidget {
   final double value;
   final double min;
   final double max;
+  final int divisions;
+  final ValueChanged<double> onChanged;
 
-  _RulerPainter({required this.value, required this.min, required this.max});
+  const _MovingRuler({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.divisions,
+    required this.onChanged,
+  });
+
+  @override
+  State<_MovingRuler> createState() => _MovingRulerState();
+}
+
+class _MovingRulerState extends State<_MovingRuler> {
+  static const double _pixelsPerStep = 14;
+
+  late double _displayValue;
+  double _dragStartValue = 0;
+  double _dragDistance = 0;
+  double? _lastReportedValue;
+  bool _isDragging = false;
+
+  double get _step {
+    if (widget.divisions <= 0 || widget.max <= widget.min) return 1;
+    return (widget.max - widget.min) / widget.divisions;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _displayValue = widget.value.clamp(widget.min, widget.max).toDouble();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MovingRuler oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_isDragging && oldWidget.value != widget.value) {
+      _displayValue = widget.value.clamp(widget.min, widget.max).toDouble();
+    }
+  }
+
+  void _startDrag(DragStartDetails details) {
+    _isDragging = true;
+    _dragDistance = 0;
+    _dragStartValue = widget.value.clamp(widget.min, widget.max).toDouble();
+    _displayValue = _dragStartValue;
+    _lastReportedValue = widget.value;
+  }
+
+  void _updateDrag(DragUpdateDetails details) {
+    _dragDistance += details.delta.dx;
+
+    // Moving the scale to the left selects a higher value.
+    final rawSteps = -_dragDistance / _pixelsPerStep;
+    final rawValue = (_dragStartValue + rawSteps * _step)
+        .clamp(widget.min, widget.max)
+        .toDouble();
+
+    setState(() => _displayValue = rawValue);
+
+    final divisionIndex = ((rawValue - widget.min) / _step).round();
+    final snappedValue = (widget.min + divisionIndex * _step)
+        .clamp(widget.min, widget.max)
+        .toDouble();
+
+    // Call the native camera only when the selected tick changes.
+    if (_lastReportedValue == null ||
+        (snappedValue - _lastReportedValue!).abs() > 0.000001) {
+      _lastReportedValue = snappedValue;
+      widget.onChanged(snappedValue);
+    }
+  }
+
+  void _finishDrag() {
+    if (!_isDragging) return;
+    _isDragging = false;
+
+    final finalValue = (_lastReportedValue ?? widget.value)
+        .clamp(widget.min, widget.max)
+        .toDouble();
+
+    setState(() {
+      _displayValue = finalValue;
+      _dragDistance = 0;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragStart: _startDrag,
+      onHorizontalDragUpdate: _updateDrag,
+      onHorizontalDragEnd: (_) => _finishDrag(),
+      onHorizontalDragCancel: _finishDrag,
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _MovingRulerPainter(
+          displayValue: _displayValue,
+          min: widget.min,
+          max: widget.max,
+          divisions: widget.divisions,
+          pixelsPerStep: _pixelsPerStep,
+        ),
+      ),
+    );
+  }
+}
+
+class _MovingRulerPainter extends CustomPainter {
+  final double displayValue;
+  final double min;
+  final double max;
+  final int divisions;
+  final double pixelsPerStep;
+
+  const _MovingRulerPainter({
+    required this.displayValue,
+    required this.min,
+    required this.max,
+    required this.divisions,
+    required this.pixelsPerStep,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final centerY = h / 2;
+    if (divisions <= 0 || max <= min) return;
 
-    // Draw tick marks — 20 minor ticks + 5 major ticks across the width
-    final tickPaint = Paint()
-      ..color = Colors.white.withOpacity(0.4)
-      ..strokeWidth = 1;
+    final centerX = size.width / 2;
+    final centerY = size.height / 2;
+    final step = (max - min) / divisions;
+    final currentIndex = (displayValue - min) / step;
+    final visibleSteps = (size.width / pixelsPerStep / 2).ceil() + 2;
+    final firstIndex = math.max(0, currentIndex.floor() - visibleSteps);
+    final lastIndex = math.min(divisions, currentIndex.ceil() + visibleSteps);
 
-    final majorTickPaint = Paint()
-      ..color = Colors.white.withOpacity(0.7)
-      ..strokeWidth = 1.5;
+    final minorPaint = Paint()
+      ..color = Colors.white.withOpacity(0.38)
+      ..strokeWidth = 1
+      ..strokeCap = StrokeCap.round;
+    final mediumPaint = Paint()
+      ..color = Colors.white.withOpacity(0.62)
+      ..strokeWidth = 1.4
+      ..strokeCap = StrokeCap.round;
+    final majorPaint = Paint()
+      ..color = Colors.white.withOpacity(0.88)
+      ..strokeWidth = 1.8
+      ..strokeCap = StrokeCap.round;
 
-    const numMinorTicks = 20;
-    const numMajorTicks = 5;
+    for (int index = firstIndex; index <= lastIndex; index++) {
+      final x = centerX + (index - currentIndex) * pixelsPerStep;
+      if (x < -pixelsPerStep || x > size.width + pixelsPerStep) continue;
 
-    for (int i = 0; i <= numMinorTicks; i++) {
-      final x = (w / numMinorTicks) * i;
-      // Every 4th tick = major
-      final isMajor = i % (numMinorTicks ~/ numMajorTicks) == 0;
-      final tickHeight = isMajor ? 12.0 : 6.0;
+      final isMajor = index % 5 == 0;
+      final isMedium = !isMajor && index % 2 == 0;
+      final tickHeight = isMajor ? 26.0 : (isMedium ? 18.0 : 11.0);
+      final paint = isMajor ? majorPaint : (isMedium ? mediumPaint : minorPaint);
+
       canvas.drawLine(
         Offset(x, centerY - tickHeight / 2),
         Offset(x, centerY + tickHeight / 2),
-        isMajor ? majorTickPaint : tickPaint,
+        paint,
       );
     }
 
-    // Draw center vertical indicator (amber)
-    final normalized = (value - min) / (max - min);
-    final thumbX = normalized * w;
+    // Fade both edges so the fixed center selection is emphasized.
+    final edgeFadePaint = Paint()
+      ..shader = LinearGradient(
+        colors: [
+          Colors.black.withOpacity(0.75),
+          Colors.transparent,
+          Colors.transparent,
+          Colors.black.withOpacity(0.75),
+        ],
+        stops: const [0, 0.18, 0.82, 1],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), edgeFadePaint);
 
     final indicatorPaint = Paint()
       ..color = Colors.amber
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round;
-
     canvas.drawLine(
-      Offset(thumbX, centerY - 18),
-      Offset(thumbX, centerY + 18),
+      Offset(centerX, 5),
+      Offset(centerX, size.height - 5),
       indicatorPaint,
     );
 
-    // Draw small circle sa taas ng indicator
-    final circlePaint = Paint()
-      ..color = Colors.amber
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(thumbX, centerY - 20), 4, circlePaint);
+    final triangle = Path()
+      ..moveTo(centerX - 5, 2)
+      ..lineTo(centerX + 5, 2)
+      ..lineTo(centerX, 9)
+      ..close();
+    canvas.drawPath(triangle, Paint()..color = Colors.amber);
   }
 
   @override
-  bool shouldRepaint(covariant _RulerPainter oldDelegate) {
-    return oldDelegate.value != value ||
+  bool shouldRepaint(covariant _MovingRulerPainter oldDelegate) {
+    return oldDelegate.displayValue != displayValue ||
         oldDelegate.min != min ||
-        oldDelegate.max != max;
+        oldDelegate.max != max ||
+        oldDelegate.divisions != divisions;
   }
 }
