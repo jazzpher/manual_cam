@@ -31,12 +31,12 @@ class CameraManager: NSObject {
     private var currentPhysicalOrientation: UIDeviceOrientation = .portrait
 
     // Core Image context — reusable, Metal GPU-accelerated
-    // [CHANGED] Now configured for RAW processing with wide gamut support
+    // Configured for wide gamut internal processing, sRGB output for JPEG
     private let ciContext: CIContext = {
         return CIContext(options: [
             .useSoftwareRenderer: false,
-            .workingColorSpace: CGColorSpace(name: CGColorSpace.displayP3)!,  // [NEW] Wide gamut
-            .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,        // [NEW] Standard output
+            .workingColorSpace: CGColorSpace(name: CGColorSpace.displayP3)!,
+            .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
         ])
     }()
 
@@ -285,7 +285,7 @@ class CameraManager: NSObject {
 
     func setHDR(_ enabled: Bool) { isHDREnabled = enabled }
 
-    // [CHANGED] HDR+ now REQUIRES RAW to work (kailangan ng DNG file for CIRAWFilter)
+    // HDR+ now requires RAW to work (kailangan ng DNG file for CIRAWFilter)
     func setHdrPlus(_ enabled: Bool) {
         isHdrPlusEnabled = enabled
         print("🌈 Native HDR+ set to: \(enabled) (requires RAW mode for true 14-bit processing)")
@@ -343,23 +343,21 @@ class CameraManager: NSObject {
         }
     }
 
-    // [REMOVED] Old applyNativeHDR(imageData:) — that was JPEG-based (8-bit)
-
-    // [NEW] === TRUE 14-BIT RAW HDR PROCESSING ===
-    // Ito ang bagong core ng HDR+. Nag-p-process directly sa 12-14 bit RAW sensor data
-    // using CIRAWFilter — Apple's dedicated RAW processing filter (same used in Photos app).
+    // === TRUE 14-BIT RAW HDR PROCESSING ===
+    // Requires iOS 15.0+ (CIRAWFilter API)
+    // Ito ang core ng HDR+. Nag-p-process directly sa 12-14 bit RAW sensor data
+    // using CIRAWFilter — Apple's dedicated RAW processing filter.
     //
     // Bakit true 14-bit:
     // - CIRAWFilter decodes yung DNG sa native sensor precision (12-14 bits per channel)
     // - Filter operations happen sa 32-bit float internally
     // - Final render lang na-r-reduce to 8-bit for JPEG output
-    // - Highlight/shadow recovery ay nasa RAW pipeline mismo (~4 stops vs ~1 stop sa JPEG)
     //
     // Returns: Path to new HDR-processed JPEG file, or nil on failure.
+    @available(iOS 15.0, *)
     private func applyRawHDR(dngURL: URL) -> String? {
         print("🌈 Loading RAW DNG for 14-bit HDR processing...")
 
-        // Load DNG using CIRAWFilter (14-bit native precision)
         guard let rawFilter = CIRAWFilter(imageURL: dngURL) else {
             print("⚠️ Failed to create CIRAWFilter from DNG")
             return nil
@@ -369,15 +367,11 @@ class CameraManager: NSObject {
         // Since we're operating on RAW data, kaya nating gumawa ng aggressive
         // adjustments na hindi ma-i-imagine sa 8-bit JPEG:
 
-        // 1. Highlight recovery — pull down bright areas by ~2 stops
-        //    (sa RAW, kaya natin i-recover hanggang ~4 stops ng highlight detail)
+        // 1. Highlight recovery — pull down bright areas
         rawFilter.exposure = -0.3  // Slight overall exposure reduction to protect highlights
 
-        // 2. Shadow lift via boost (mas maganda sa RAW)
-        //    Ito yung "shadow bias" — brightens sa darker parts habang protected ang highlights
-        if #available(iOS 15.0, *) {
-            rawFilter.shadowBias = 0.4  // Positive = lift shadows
-        }
+        // 2. Shadow lift via bias (mas maganda sa RAW)
+        rawFilter.shadowBias = 0.4  // Positive = lift shadows
 
         // 3. Local contrast enhancement (preserves colors, adds depth)
         rawFilter.detailAmount = 0.2  // Slight detail boost
@@ -385,8 +379,7 @@ class CameraManager: NSObject {
         // 4. Neutral color — walang saturation boost
         //    (RAW ay maga-render with accurate colors as-is)
 
-        // 5. Noise reduction (RAW mas noisy kaysa JPEG, kailangan ng konting NR)
-        rawFilter.noiseReductionAmount = 0.3
+        // Note: noiseReductionAmount is iOS 16+ only, tinanggal for compatibility
 
         guard var processed = rawFilter.outputImage else {
             print("⚠️ Failed to render RAW output image")
@@ -460,10 +453,6 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        // [REMOVED] Yung old JPEG-based HDR processing sa dito (na 8-bit lang)
-        // [CHANGED] HDR+ processing ay lumipat na sa checkAndComplete()
-        //           kasi kailangan natin yung DNG file para mag-work with CIRAWFilter
-
         let tmpDir = NSTemporaryDirectory()
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
         let suffix = isRawPhoto ? "_raw" : ""
@@ -489,23 +478,29 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
         if receivedPhotoCount >= expectedPhotoCount || captureError != nil {
 
-            // [NEW] === APPLY TRUE 14-BIT HDR AFTER LAHAT NG PHOTOS RECEIVED ===
+            // === APPLY TRUE 14-BIT HDR AFTER LAHAT NG PHOTOS RECEIVED ===
             // Kailangan lahat ng photos natin (both DNG at JPEG) bago mag-HDR
             // kasi kailangan natin ng DNG file bilang input for CIRAWFilter
             if isHdrPlusEnabled, captureError == nil, let rawPath = pendingRawURL {
-                print("🌈 Starting true 14-bit RAW HDR pipeline...")
-                let rawURL = URL(fileURLWithPath: rawPath)
+                // iOS 15.0+ required para sa CIRAWFilter
+                if #available(iOS 15.0, *) {
+                    print("🌈 Starting true 14-bit RAW HDR pipeline...")
+                    let rawURL = URL(fileURLWithPath: rawPath)
 
-                // Process asynchronously para hindi mag-block ang delegate queue
-                DispatchQueue.global(qos: .userInitiated).async {
-                    if let hdrPath = self.applyRawHDR(dngURL: rawURL) {
-                        // Successfully processed — palitan yung JPEG path ng HDR version
-                        self.pendingJpegURL = hdrPath
-                        print("✅ HDR+ (14-bit) done, JPEG replaced with HDR version")
-                    } else {
-                        print("⚠️ HDR+ failed, using original JPEG")
+                    // Process asynchronously para hindi mag-block ang delegate queue
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        if let hdrPath = self.applyRawHDR(dngURL: rawURL) {
+                            // Successfully processed — palitan yung JPEG path ng HDR version
+                            self.pendingJpegURL = hdrPath
+                            print("✅ HDR+ (14-bit) done, JPEG replaced with HDR version")
+                        } else {
+                            print("⚠️ HDR+ failed, using original JPEG")
+                        }
+                        self.completeCallback()
                     }
-                    self.completeCallback()
+                } else {
+                    print("⚠️ HDR+ requires iOS 15.0+, skipping (using standard JPEG)")
+                    completeCallback()
                 }
             } else {
                 completeCallback()
@@ -513,7 +508,7 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
         }
     }
 
-    // [NEW] Extracted the completion logic sa sariling function
+    // Extracted the completion logic sa sariling function
     // para pwedeng tawagin async after HDR processing
     private func completeCallback() {
         DispatchQueue.main.async {
