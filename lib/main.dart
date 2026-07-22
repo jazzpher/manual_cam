@@ -66,6 +66,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Offset? _tapFocusPoint;
 
+  // === ACTIVE DIAL STATE ===
+  // Kung anong setting ang currently naka-open sa ruler dial
+  SettingType _activeDial = SettingType.none;
+
   int _uiOrientation = 0;
   Timer? _orientationPollTimer;
 
@@ -198,6 +202,11 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
+  // === DIAL SELECTION CALLBACK ===
+  void _onSelectDial(SettingType type) {
+    setState(() => _activeDial = type);
+  }
+
   Future<void> _onPreviewTap(double x, double y) async {
     setState(() => _tapFocusPoint = Offset(x, y));
     await _camera.focusAtPoint(x, y);
@@ -316,13 +325,12 @@ class _CameraScreenState extends State<CameraScreen> {
 
           if (_tapFocusPoint != null) _buildFocusReticle(_tapFocusPoint!),
 
-          // Bottom gradient for slider readability
           Positioned(
             bottom: 0,
             left: 0,
             right: 0,
             child: Container(
-              height: 360,
+              height: 340,
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -351,6 +359,7 @@ class _CameraScreenState extends State<CameraScreen> {
             isHdrPlusEnabled: _isHdrPlusEnabled,
             isCapturing: _isCapturing,
             uiOrientation: _uiOrientation,
+            activeDial: _activeDial,
             onISOChanged: _setISO,
             onShutterSpeedChanged: _setShutter,
             onExposureBiasChanged: _setEV,
@@ -358,6 +367,7 @@ class _CameraScreenState extends State<CameraScreen> {
             onFocusChanged: _setFocus,
             onAspectRatioChanged: (r) => setState(() => _aspectRatio = r),
             onFlashModeChanged: _setFlash,
+            onSelectDial: _onSelectDial,
             onCapture: _capturePhoto,
             onToggleHDR: _toggleHDR,
             onToggleRAW: _toggleRAW,

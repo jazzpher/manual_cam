@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+/// Setting types for the active dial
+enum SettingType { none, shutter, iso, ev, focus, zoom }
+
 class ControlsOverlay extends StatelessWidget {
   final double iso, minISO, maxISO, exposureBias, zoom, maxZoom, focus;
   final String shutterSpeed, aspectRatio, flashMode;
@@ -8,8 +11,10 @@ class ControlsOverlay extends StatelessWidget {
   final List<String> aspectRatios;
   final bool isHDREnabled, isRawEnabled, isHdrPlusEnabled, isCapturing;
   final int uiOrientation;
+  final SettingType activeDial;
   final Function(double) onISOChanged, onShutterSpeedChanged, onExposureBiasChanged, onZoomChanged, onFocusChanged;
   final Function(String) onAspectRatioChanged, onFlashModeChanged;
+  final Function(SettingType) onSelectDial;
   final VoidCallback onCapture, onToggleHDR, onToggleRAW, onToggleHdrPlus;
 
   const ControlsOverlay({
@@ -31,6 +36,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.isHdrPlusEnabled,
     required this.isCapturing,
     required this.uiOrientation,
+    required this.activeDial,
     required this.onISOChanged,
     required this.onShutterSpeedChanged,
     required this.onExposureBiasChanged,
@@ -38,6 +44,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onFocusChanged,
     required this.onAspectRatioChanged,
     required this.onFlashModeChanged,
+    required this.onSelectDial,
     required this.onCapture,
     required this.onToggleHDR,
     required this.onToggleRAW,
@@ -62,26 +69,6 @@ class ControlsOverlay extends StatelessWidget {
     );
   }
 
-  // Find nearest shutter value sa slider position
-  double _shutterSecondsFromIndex(double index) {
-    final i = index.round().clamp(0, shutterSpeedValues.length - 1);
-    return shutterSpeedValues[i];
-  }
-
-  double _shutterIndexFromValue(double seconds) {
-    // Find closest match
-    int closestIdx = 0;
-    double closestDiff = double.infinity;
-    for (int i = 0; i < shutterSpeedValues.length; i++) {
-      final diff = (shutterSpeedValues[i] - seconds).abs();
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestIdx = i;
-      }
-    }
-    return closestIdx.toDouble();
-  }
-
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -90,9 +77,13 @@ class ControlsOverlay extends StatelessWidget {
           _buildTopBar(),
           const Spacer(),
           _buildAspectRatioSelector(),
-          const SizedBox(height: 4),
-          _buildInlineSliders(context),
           const SizedBox(height: 8),
+          // === RULER DIAL (lumalabas kapag may active setting) ===
+          if (activeDial != SettingType.none)
+            _buildRulerDial(),
+          const SizedBox(height: 6),
+          _buildSettingPicker(),
+          const SizedBox(height: 12),
           _buildBottomControls(),
           const SizedBox(height: 12),
         ],
@@ -175,7 +166,7 @@ class ControlsOverlay extends StatelessWidget {
 
   Widget _buildAspectRatioSelector() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: aspectRatios.map((ratio) {
@@ -205,155 +196,230 @@ class ControlsOverlay extends StatelessWidget {
     );
   }
 
-  // === INLINE SLIDERS (Halide-style, always visible) ===
-  Widget _buildInlineSliders(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.6),
-        borderRadius: BorderRadius.circular(12),
+  // === SETTING PICKER (5 buttons: SHUTTER, ISO, EV, FOCUS, ZOOM) ===
+  Widget _buildSettingPicker() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _pickerButton(
+            type: SettingType.shutter,
+            label: 'SHUTTER',
+            value: shutterSpeed,
+          ),
+          _pickerButton(
+            type: SettingType.iso,
+            label: 'ISO',
+            value: iso.toInt().toString(),
+          ),
+          _pickerButton(
+            type: SettingType.ev,
+            label: 'EV',
+            value: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
+          ),
+          _pickerButton(
+            type: SettingType.focus,
+            label: 'FOCUS',
+            value: focus.toStringAsFixed(2),
+          ),
+          _pickerButton(
+            type: SettingType.zoom,
+            label: 'ZOOM',
+            value: '${zoom.toStringAsFixed(1)}x',
+          ),
+        ],
       ),
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      child: Column(
+    );
+  }
+
+  Widget _pickerButton({
+    required SettingType type,
+    required String label,
+    required String value,
+  }) {
+    final isActive = activeDial == type;
+    return GestureDetector(
+      onTap: () {
+        // Tap toggle: if same active, close; else switch
+        onSelectDial(isActive ? SettingType.none : type);
+      },
+      behavior: HitTestBehavior.opaque,
+      child: _rotate(Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: isActive ? Colors.amber.withOpacity(0.25) : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isActive ? Colors.amber : Colors.transparent,
+            width: 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(value,
+                style: TextStyle(
+                  color: isActive ? Colors.amber : Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'monospace',
+                )),
+            const SizedBox(height: 2),
+            Text(label,
+                style: TextStyle(
+                  color: isActive ? Colors.amber : Colors.grey,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w600,
+                )),
+          ],
+        ),
+      )),
+    );
+  }
+
+  // === RULER DIAL (horizontal swipeable ruler with tick marks) ===
+  Widget _buildRulerDial() {
+    // Get current, min, max, at label based on active setting
+    double currentValue = 0;
+    double minValue = 0;
+    double maxValue = 1;
+    String label = '';
+    Function(double) callback = (_) {};
+    int? divisions;
+
+    switch (activeDial) {
+      case SettingType.shutter:
+        currentValue = _shutterIndex(_secondsFromLabel(shutterSpeed)).toDouble();
+        minValue = 0;
+        maxValue = (shutterSpeedValues.length - 1).toDouble();
+        label = shutterSpeed;
+        divisions = shutterSpeedValues.length - 1;
+        callback = (idx) {
+          final i = idx.round().clamp(0, shutterSpeedValues.length - 1);
+          onShutterSpeedChanged(shutterSpeedValues[i]);
+        };
+        break;
+      case SettingType.iso:
+        currentValue = iso.clamp(minISO, maxISO);
+        minValue = minISO;
+        maxValue = maxISO;
+        label = 'ISO ${iso.toInt()}';
+        divisions = 50;
+        callback = onISOChanged;
+        break;
+      case SettingType.ev:
+        currentValue = exposureBias.clamp(-4.0, 4.0);
+        minValue = -4.0;
+        maxValue = 4.0;
+        label = '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)} EV';
+        divisions = 32;
+        callback = onExposureBiasChanged;
+        break;
+      case SettingType.focus:
+        currentValue = focus.clamp(0.0, 1.0);
+        minValue = 0.0;
+        maxValue = 1.0;
+        label = 'FOCUS ${focus.toStringAsFixed(2)}';
+        divisions = 100;
+        callback = onFocusChanged;
+        break;
+      case SettingType.zoom:
+        currentValue = zoom.clamp(1.0, maxZoom);
+        minValue = 1.0;
+        maxValue = maxZoom;
+        label = '${zoom.toStringAsFixed(1)}x';
+        divisions = ((maxZoom - 1.0) * 10).round().clamp(1, 100);
+        callback = onZoomChanged;
+        break;
+      default:
+        return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.75),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.amber.withOpacity(0.5), width: 1),
+      ),
+      child: _rotate(Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildInlineSlider(
-            context: context,
-            label: 'SHUTTER',
-            valueText: shutterSpeed,
-            value: _shutterIndexFromValue(_secondsFromLabel(shutterSpeed)),
-            min: 0,
-            max: (shutterSpeedValues.length - 1).toDouble(),
-            divisions: shutterSpeedValues.length - 1,
-            onChanged: (idx) => onShutterSpeedChanged(_shutterSecondsFromIndex(idx)),
+          // Current value label
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.amber,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'monospace',
+            ),
           ),
-          _buildInlineSlider(
-            context: context,
-            label: 'ISO',
-            valueText: iso.toInt().toString(),
-            value: iso.clamp(minISO, maxISO),
-            min: minISO,
-            max: maxISO,
-            divisions: 50,
-            onChanged: onISOChanged,
-          ),
-          _buildInlineSlider(
-            context: context,
-            label: 'EV',
-            valueText: '${exposureBias >= 0 ? '+' : ''}${exposureBias.toStringAsFixed(1)}',
-            value: exposureBias.clamp(-4.0, 4.0),
-            min: -4.0,
-            max: 4.0,
-            divisions: 32,
-            onChanged: onExposureBiasChanged,
-          ),
-          _buildInlineSlider(
-            context: context,
-            label: 'FOCUS',
-            valueText: focus.toStringAsFixed(2),
-            value: focus.clamp(0.0, 1.0),
-            min: 0.0,
-            max: 1.0,
-            divisions: 100,
-            onChanged: onFocusChanged,
-          ),
-          _buildInlineSlider(
-            context: context,
-            label: 'ZOOM',
-            valueText: '${zoom.toStringAsFixed(1)}x',
-            value: zoom.clamp(1.0, maxZoom),
-            min: 1.0,
-            max: maxZoom,
-            divisions: ((maxZoom - 1.0) * 10).round().clamp(1, 100),
-            onChanged: onZoomChanged,
+          const SizedBox(height: 8),
+          // Ruler with tick marks
+          SizedBox(
+            height: 44,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return CustomPaint(
+                  size: Size(constraints.maxWidth, 44),
+                  painter: _RulerPainter(
+                    value: currentValue,
+                    min: minValue,
+                    max: maxValue,
+                  ),
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      activeTrackColor: Colors.transparent,
+                      inactiveTrackColor: Colors.transparent,
+                      thumbColor: Colors.transparent,
+                      overlayColor: Colors.transparent,
+                      trackHeight: 40,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 20),
+                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 25),
+                    ),
+                    child: Slider(
+                      value: currentValue,
+                      min: minValue,
+                      max: maxValue,
+                      divisions: divisions,
+                      onChanged: callback,
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
         ],
-      ),
+      )),
     );
   }
 
-  // Reverse lookup: convert shutter label back to seconds
-  double _secondsFromLabel(String label) {
-    if (label.contains('"')) {
-      // e.g. "2\""
-      final n = double.tryParse(label.replaceAll('"', '')) ?? 1;
-      return n;
-    } else if (label.contains('/')) {
-      // e.g. "1/60"
-      final parts = label.split('/');
-      if (parts.length == 2) {
-        final denom = double.tryParse(parts[1]) ?? 60;
-        return 1 / denom;
+  int _shutterIndex(double seconds) {
+    int closestIdx = 0;
+    double closestDiff = double.infinity;
+    for (int i = 0; i < shutterSpeedValues.length; i++) {
+      final diff = (shutterSpeedValues[i] - seconds).abs();
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        closestIdx = i;
       }
     }
-    return 1 / 60; // fallback
+    return closestIdx;
   }
 
-  Widget _buildInlineSlider({
-    required BuildContext context,
-    required String label,
-    required String valueText,
-    required double value,
-    required double min,
-    required double max,
-    required int divisions,
-    required Function(double) onChanged,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          // Label
-          SizedBox(
-            width: 60,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.grey,
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-              ),
-              textAlign: TextAlign.left,
-            ),
-          ),
-          // Slider
-          Expanded(
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                activeTrackColor: Colors.amber,
-                inactiveTrackColor: Colors.white24,
-                thumbColor: Colors.amber,
-                overlayColor: Colors.amber.withOpacity(0.2),
-                trackHeight: 3,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-              ),
-              child: Slider(
-                value: value,
-                min: min,
-                max: max,
-                divisions: divisions,
-                onChanged: onChanged,
-              ),
-            ),
-          ),
-          // Value display
-          SizedBox(
-            width: 55,
-            child: Text(
-              valueText,
-              style: const TextStyle(
-                color: Colors.amber,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'monospace',
-              ),
-              textAlign: TextAlign.right,
-            ),
-          ),
-        ],
-      ),
-    );
+  double _secondsFromLabel(String label) {
+    if (label.contains('"')) {
+      return double.tryParse(label.replaceAll('"', '')) ?? 1;
+    } else if (label.contains('/')) {
+      final parts = label.split('/');
+      if (parts.length == 2) {
+        return 1 / (double.tryParse(parts[1]) ?? 60);
+      }
+    }
+    return 1 / 60;
   }
 
   Widget _buildBottomControls() {
@@ -405,5 +471,77 @@ class ControlsOverlay extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// === CUSTOM PAINTER FOR RULER TICKS ===
+class _RulerPainter extends CustomPainter {
+  final double value;
+  final double min;
+  final double max;
+
+  _RulerPainter({
+    required this.value,
+    required this.min,
+    required this.max,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final centerY = h / 2;
+
+    // Draw tick marks — 20 minor ticks + 5 major ticks across the width
+    final tickPaint = Paint()
+      ..color = Colors.white.withOpacity(0.4)
+      ..strokeWidth = 1;
+
+    final majorTickPaint = Paint()
+      ..color = Colors.white.withOpacity(0.7)
+      ..strokeWidth = 1.5;
+
+    const numMinorTicks = 20;
+    const numMajorTicks = 5;
+
+    for (int i = 0; i <= numMinorTicks; i++) {
+      final x = (w / numMinorTicks) * i;
+      // Every 4th tick = major
+      final isMajor = i % (numMinorTicks ~/ numMajorTicks) == 0;
+      final tickHeight = isMajor ? 12.0 : 6.0;
+      canvas.drawLine(
+        Offset(x, centerY - tickHeight / 2),
+        Offset(x, centerY + tickHeight / 2),
+        isMajor ? majorTickPaint : tickPaint,
+      );
+    }
+
+    // Draw center vertical indicator (amber)
+    final normalized = (value - min) / (max - min);
+    final thumbX = normalized * w;
+
+    final indicatorPaint = Paint()
+      ..color = Colors.amber
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawLine(
+      Offset(thumbX, centerY - 18),
+      Offset(thumbX, centerY + 18),
+      indicatorPaint,
+    );
+
+    // Draw small circle sa taas ng indicator
+    final circlePaint = Paint()
+      ..color = Colors.amber
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(thumbX, centerY - 20), 4, circlePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _RulerPainter oldDelegate) {
+    return oldDelegate.value != value ||
+        oldDelegate.min != min ||
+        oldDelegate.max != max;
   }
 }
