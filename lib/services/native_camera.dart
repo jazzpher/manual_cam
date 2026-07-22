@@ -1,18 +1,19 @@
 import 'dart:io';
-import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:gal/gal.dart';
 import 'package:image/image.dart' as img;
 
 /// Bridge sa native iOS AVFoundation camera.
+/// HDR+ processing ay ginagawa sa Swift side using Core Image (Metal GPU).
 class NativeCamera {
   static const _channel = MethodChannel('manual_cam/camera');
 
   bool _initialized = false;
   Map<String, dynamic> _capabilities = {};
 
-  bool hdrMode = false;
+  // HDR+ mode state — pinapasa sa native side via method channel
+  bool _hdrMode = false;
 
   bool get isInitialized => _initialized;
   Map<String, dynamic> get capabilities => _capabilities;
@@ -24,6 +25,16 @@ class NativeCamera {
   double get maxZoom => (_capabilities['maxZoom'] as num?)?.toDouble() ?? 10.0;
   bool get supportsHDR => _capabilities['supportsHDR'] as bool? ?? false;
   bool get supportsRAW => _capabilities['supportsRAW'] as bool? ?? false;
+
+  /// Setter for HDR+ mode — automatically syncs sa native side
+  bool get hdrMode => _hdrMode;
+  set hdrMode(bool enabled) {
+    _hdrMode = enabled;
+    // Fire-and-forget sync sa Swift
+    _channel.invokeMethod('setHdrPlus', {'enabled': enabled}).catchError((e) {
+      print('setHdrPlus error: $e');
+    });
+  }
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -98,6 +109,8 @@ class NativeCamera {
     }
   }
 
+  /// Regular capture. Native HDR+ ay auto-applied sa Swift side kapag `hdrMode` ON.
+  /// Yung DNG/RAW ay untouched (para sa Lightroom editing).
   Future<Map<String, String>> capturePhoto() async {
     try {
       final result = await _channel.invokeMethod('capturePhoto');
@@ -120,6 +133,7 @@ class NativeCamera {
 
       if (paths.isEmpty) throw Exception('No files created');
 
+      // Software zoom crop for RAW mode (kung naka-RAW at zoomed > 1x)
       if (softwareZoom > 1.01 && paths['raw'] != null && paths['jpeg'] != null) {
         try {
           final croppedJpegPath = await _softwareZoomCrop(paths['jpeg']!, softwareZoom);
@@ -127,17 +141,10 @@ class NativeCamera {
         } catch (e) { print('⚠️ JPEG crop failed: $e'); }
       }
 
-      if (hdrMode && paths['jpeg'] != null) {
-        try {
-          print('🌈 Applying luminance-only HDR (color-preserving)...');
-          final hdrPath = await _applyLuminanceHDR(paths['jpeg']!);
-          if (hdrPath != null) {
-            paths['jpeg'] = hdrPath;
-            print('✅ HDR applied (colors preserved)');
-          }
-        } catch (e) { print('⚠️ HDR failed: $e'); }
-      }
+      // NOTE: HDR+ processing ay ginagawa na sa native Swift side
+      // via Core Image (Metal GPU). Walang Dart-side processing needed.
 
+      // Save to Photos app
       try {
         final hasAccess = await Gal.hasAccess(toAlbum: true);
         if (!hasAccess) await Gal.requestAccess(toAlbum: true);
@@ -154,118 +161,6 @@ class NativeCamera {
       return paths;
     } on PlatformException catch (e) {
       throw Exception('Capture failed: ${e.message}');
-    }
-  }
-
-  /// === LUMINANCE-ONLY HDR ===
-  /// Process only the luminance channel (Y in YCbCr) para hindi mag-alter yung colors.
-  /// Yung original hue at saturation ay maintained perfectly.
-  ///
-  /// Process:
-  /// 1. Convert RGB → YCbCr (Y=brightness, Cb=blue-diff, Cr=red-diff)
-  /// 2. Create 3 virtual Y-channel exposures (under, normal, over)
-  /// 3. Blend Y using luminance-weighted masking
-  /// 4. Convert back YCbCr → RGB using NEW Y + ORIGINAL Cb/Cr
-  ///
-  /// Result: brightness ay ma-e-enhance sa dark/bright areas,
-  /// pero yung colors (skin tone, sky blue, atbp.) ay hindi magbabago.
-  Future<String?> _applyLuminanceHDR(String jpegPath) async {
-    try {
-      final file = File(jpegPath);
-      final bytes = await file.readAsBytes();
-      final image = img.decodeJpg(bytes);
-      if (image == null) return null;
-
-      final w = image.width;
-      final h = image.height;
-
-      // Pre-compute exposure LUTs for Y channel only
-      final underLUT = List<int>.generate(256, (v) {
-        final n = v / 255.0;
-        return (math.pow(n, 2.0).toDouble() * 255.0).round().clamp(0, 255);
-      });
-
-      final overLUT = List<int>.generate(256, (v) {
-        final n = v / 255.0;
-        return (math.pow(n, 0.5).toDouble() * 255.0).round().clamp(0, 255);
-      });
-
-      for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-          final pixel = image.getPixel(x, y);
-          final r = pixel.r.toInt().clamp(0, 255);
-          final g = pixel.g.toInt().clamp(0, 255);
-          final b = pixel.b.toInt().clamp(0, 255);
-
-          // === RGB → YCbCr conversion (BT.601 standard) ===
-          final origY = (0.299 * r + 0.587 * g + 0.114 * b);
-          final cb = 128 + (-0.168736 * r - 0.331264 * g + 0.5 * b);
-          final cr = 128 + (0.5 * r - 0.418688 * g - 0.081312 * b);
-
-          // === Y-channel exposure blending ===
-          final origYInt = origY.round().clamp(0, 255);
-          final underY = underLUT[origYInt].toDouble();
-          final overY = overLUT[origYInt].toDouble();
-
-          // Weight computation based on original Y (luminance)
-          double wUnder, wNormal, wOver;
-
-          if (origY > 200) {
-            final t = ((origY - 200) / 55).clamp(0.0, 1.0);
-            wUnder = 0.5 + 0.4 * t;
-            wNormal = 0.4 - 0.3 * t;
-            wOver = 0.1 - 0.1 * t;
-          } else if (origY > 140) {
-            final t = ((origY - 140) / 60).clamp(0.0, 1.0);
-            wUnder = 0.2 + 0.3 * t;
-            wNormal = 0.7 - 0.2 * t;
-            wOver = 0.1 - 0.1 * t;
-          } else if (origY < 55) {
-            final t = ((55 - origY) / 55).clamp(0.0, 1.0);
-            wOver = 0.5 + 0.4 * t;
-            wNormal = 0.4 - 0.3 * t;
-            wUnder = 0.1 - 0.1 * t;
-          } else if (origY < 115) {
-            final t = ((115 - origY) / 60).clamp(0.0, 1.0);
-            wOver = 0.2 + 0.3 * t;
-            wNormal = 0.7 - 0.2 * t;
-            wUnder = 0.1 - 0.1 * t;
-          } else {
-            wUnder = 0.15;
-            wNormal = 0.7;
-            wOver = 0.15;
-          }
-
-          wUnder = wUnder.clamp(0.0, 1.0);
-          wNormal = wNormal.clamp(0.0, 1.0);
-          wOver = wOver.clamp(0.0, 1.0);
-          final total = wUnder + wNormal + wOver;
-          wUnder /= total;
-          wNormal /= total;
-          wOver /= total;
-
-          // Blend Y only
-          final newY = (underY * wUnder + origY * wNormal + overY * wOver);
-
-          // === YCbCr → RGB conversion (using NEW Y + ORIGINAL Cb/Cr) ===
-          // Ito ang key: yung Cb/Cr (color info) ay hindi natin ginalaw.
-          // Kaya same colors, iba lang yung brightness.
-          final newR = (newY + 1.402 * (cr - 128)).round().clamp(0, 255);
-          final newG = (newY - 0.344136 * (cb - 128) - 0.714136 * (cr - 128)).round().clamp(0, 255);
-          final newB = (newY + 1.772 * (cb - 128)).round().clamp(0, 255);
-
-          image.setPixelRgb(x, y, newR, newG, newB);
-        }
-      }
-
-      // NO saturation or contrast boost — pure luminance processing lang
-      final jpg = img.encodeJpg(image, quality: 92);
-      final newPath = jpegPath.replaceFirst('.jpg', '_hdr.jpg');
-      await File(newPath).writeAsBytes(jpg);
-      return newPath;
-    } catch (e) {
-      print('HDR error: $e');
-      return null;
     }
   }
 
