@@ -38,10 +38,10 @@ class _NativeCameraPreviewState extends State<NativeCameraPreview> {
     }
   }
 
-  void _handleTap(TapDownDetails details, double width, double height) {
+  void _handleTapAt(Offset position, double width, double height) {
     final localPoint = Offset(
-      details.localPosition.dx.clamp(0.0, width),
-      details.localPosition.dy.clamp(0.0, height),
+      position.dx.clamp(0.0, width),
+      position.dy.clamp(0.0, height),
     );
 
     setState(() => _reticlePoint = localPoint);
@@ -96,10 +96,12 @@ class _NativeCameraPreviewState extends State<NativeCameraPreview> {
               width: previewW,
               height: previewH,
               child: ClipRect(
-                child: GestureDetector(
+                child: Listener(
                   behavior: HitTestBehavior.opaque,
-                  onTapDown: (details) =>
-                      _handleTap(details, previewW, previewH),
+                  // Listener receives the pointer immediately, unlike a
+                  // GestureDetector competing with the native UiKitView.
+                  onPointerDown: (event) =>
+                      _handleTapAt(event.localPosition, previewW, previewH),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [

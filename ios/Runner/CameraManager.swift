@@ -286,16 +286,20 @@ class CameraManager: NSObject {
                 try d.lockForConfiguration()
                 if d.isFocusPointOfInterestSupported {
                     d.focusPointOfInterest = point
-                    if d.isFocusModeSupported(.continuousAutoFocus) {
-                        d.focusMode = .continuousAutoFocus
-                    } else if d.isFocusModeSupported(.autoFocus) {
+                    if d.isFocusModeSupported(.autoFocus) {
+                        // A one-shot scan reacts more decisively to a tap than
+                        // merely updating an already-running continuous mode.
                         d.focusMode = .autoFocus
+                    } else if d.isFocusModeSupported(.continuousAutoFocus) {
+                        d.focusMode = .continuousAutoFocus
                     }
                 }
                 if d.isExposurePointOfInterestSupported {
                     d.exposurePointOfInterest = point
                 }
-                if d.isExposureModeSupported(.continuousAutoExposure) {
+                if d.isExposureModeSupported(.autoExpose) {
+                    d.exposureMode = .autoExpose
+                } else if d.isExposureModeSupported(.continuousAutoExposure) {
                     d.exposureMode = .continuousAutoExposure
                 }
                 if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
@@ -307,6 +311,25 @@ class CameraManager: NSObject {
                 d.isSubjectAreaChangeMonitoringEnabled = true
                 d.unlockForConfiguration()
                 completion(true)
+
+                // After the tap has had time to settle, resume continuous AE/AF.
+                // Do not override a manual adjustment made in the meantime.
+                self.sessionQueue.asyncAfter(deadline: .now() + 1.0) {
+                    do {
+                        try d.lockForConfiguration()
+                        if d.focusMode == .autoFocus,
+                           d.isFocusModeSupported(.continuousAutoFocus) {
+                            d.focusMode = .continuousAutoFocus
+                        }
+                        if d.exposureMode == .autoExpose,
+                           d.isExposureModeSupported(.continuousAutoExposure) {
+                            d.exposureMode = .continuousAutoExposure
+                        }
+                        d.unlockForConfiguration()
+                    } catch {
+                        print("⚠️ Unable to resume continuous AE/AF: \(error)")
+                    }
+                }
             } catch { completion(false) }
         }
     }
