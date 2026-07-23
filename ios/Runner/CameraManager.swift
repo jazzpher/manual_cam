@@ -254,14 +254,25 @@ class CameraManager: NSObject {
                 let point = CGPoint(x: CGFloat(x), y: CGFloat(y))
                 if d.isFocusPointOfInterestSupported {
                     d.focusPointOfInterest = point
-                    d.focusMode = self.isFrameModeEnabled
-                        ? .continuousAutoFocus
-                        : .autoFocus
+                    if d.isFocusModeSupported(.continuousAutoFocus) {
+                        d.focusMode = .continuousAutoFocus
+                    } else if d.isFocusModeSupported(.autoFocus) {
+                        d.focusMode = .autoFocus
+                    }
                 }
-                if !self.isFrameModeEnabled && d.isExposurePointOfInterestSupported {
+                if d.isExposurePointOfInterestSupported {
                     d.exposurePointOfInterest = point
+                }
+                if d.isExposureModeSupported(.continuousAutoExposure) {
                     d.exposureMode = .continuousAutoExposure
                 }
+                if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                    d.whiteBalanceMode = .continuousAutoWhiteBalance
+                }
+                if d.minExposureTargetBias <= 0 && d.maxExposureTargetBias >= 0 {
+                    d.setExposureTargetBias(0, completionHandler: nil)
+                }
+                d.isSubjectAreaChangeMonitoringEnabled = true
                 d.unlockForConfiguration()
                 completion(true)
             } catch { completion(false) }

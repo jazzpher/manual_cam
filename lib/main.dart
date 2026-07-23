@@ -60,8 +60,8 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isRawEnabled = false;
   bool _isNatural48Enabled = false;
   bool _isFrameModeEnabled = false;
-  bool _frameExposureAuto = true;
-  bool _frameFocusAuto = true;
+  bool _isExposureAuto = true;
+  bool _isFocusAuto = true;
   bool _supportsRAW = false;
   String _flashMode = 'off';
   String _aspectRatio = '4:3';
@@ -149,7 +149,7 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _setISO(double v) async {
     setState(() {
       _iso = v;
-      if (_isFrameModeEnabled) _frameExposureAuto = false;
+      _isExposureAuto = false;
     });
     await _camera.setISO(v);
   }
@@ -157,7 +157,7 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _setShutter(double sec) async {
     setState(() {
       _shutterSpeed = _formatShutter(sec);
-      if (_isFrameModeEnabled) _frameExposureAuto = false;
+      _isExposureAuto = false;
     });
     await _camera.setShutterSpeed(sec);
   }
@@ -165,7 +165,7 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _setEV(double v) async {
     setState(() {
       _exposureBias = v;
-      if (_isFrameModeEnabled) _frameExposureAuto = true;
+      _isExposureAuto = true;
     });
     await _camera.setExposureBias(v);
   }
@@ -178,7 +178,7 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _setFocus(double v) async {
     setState(() {
       _focus = v;
-      if (_isFrameModeEnabled) _frameFocusAuto = false;
+      _isFocusAuto = false;
     });
     await _camera.setFocus(v);
   }
@@ -249,8 +249,8 @@ class _CameraScreenState extends State<CameraScreen> {
 
     setState(() {
       _isFrameModeEnabled = enable;
-      _frameExposureAuto = enable;
-      _frameFocusAuto = enable;
+      _isExposureAuto = true;
+      _isFocusAuto = true;
       _isNatural48Enabled = false;
       _isRawEnabled = false;
       _isHDREnabled = false;
@@ -309,6 +309,8 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() {
       _isNatural48Enabled = enable;
       _isFrameModeEnabled = false;
+      _isExposureAuto = true;
+      _isFocusAuto = true;
       _isRawEnabled = false;
       _isHDREnabled = false;
       _flashMode = 'off';
@@ -338,10 +340,29 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _onPreviewTap(double x, double y) async {
     setState(() {
       _tapFocusPoint = Offset(x, y);
-      if (_isFrameModeEnabled) _frameFocusAuto = true;
+      _isExposureAuto = true;
+      _isFocusAuto = true;
+      _exposureBias = 0.0;
     });
+
+    // A preview tap is the universal AUTO reset in every camera mode:
+    // continuous AE/AF/AWB at the tapped point and zero EV compensation.
     await _camera.focusAtPoint(x, y);
-    Future.delayed(const Duration(milliseconds: 1200), () {
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+
+    final values = await _camera.getCurrentCameraValues();
+    if (mounted) {
+      setState(() {
+        _iso = values['iso'] ?? _iso;
+        final shutter = values['shutterSeconds'];
+        if (shutter != null && shutter > 0) {
+          _shutterSpeed = _formatShutter(shutter);
+        }
+        _focus = values['focus'] ?? _focus;
+      });
+    }
+
+    Future<void>.delayed(const Duration(milliseconds: 850), () {
       if (mounted) setState(() => _tapFocusPoint = null);
     });
   }
@@ -485,8 +506,8 @@ class _CameraScreenState extends State<CameraScreen> {
             isRawEnabled: _isRawEnabled,
             isNatural48Enabled: _isNatural48Enabled,
             isFrameModeEnabled: _isFrameModeEnabled,
-            frameExposureAuto: _frameExposureAuto,
-            frameFocusAuto: _frameFocusAuto,
+            isExposureAuto: _isExposureAuto,
+            isFocusAuto: _isFocusAuto,
             isCapturing: _isCapturing,
             uiOrientation: _uiOrientation,
             activeDial: _activeDial,

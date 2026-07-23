@@ -13,8 +13,8 @@ class ControlsOverlay extends StatelessWidget {
       isRawEnabled,
       isNatural48Enabled,
       isFrameModeEnabled,
-      frameExposureAuto,
-      frameFocusAuto,
+      isExposureAuto,
+      isFocusAuto,
       isCapturing;
   final int uiOrientation;
   final SettingType activeDial;
@@ -49,8 +49,8 @@ class ControlsOverlay extends StatelessWidget {
     required this.isRawEnabled,
     required this.isNatural48Enabled,
     required this.isFrameModeEnabled,
-    required this.frameExposureAuto,
-    required this.frameFocusAuto,
+    required this.isExposureAuto,
+    required this.isFocusAuto,
     required this.isCapturing,
     required this.uiOrientation,
     required this.activeDial,
@@ -185,7 +185,14 @@ class ControlsOverlay extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          _rotate(_pill(label: 'MANUAL', color: Colors.amber)),
+          _rotate(
+            _pill(
+              label: isExposureAuto && isFocusAuto ? 'AUTO' : 'MANUAL',
+              color: isExposureAuto && isFocusAuto
+                  ? Colors.lightBlueAccent
+                  : Colors.amber,
+            ),
+          ),
         ],
       ),
     );
@@ -275,17 +282,13 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.shutter,
             label: 'SHUTTER',
-            value:
-                isNatural48Enabled || (isFrameModeEnabled && frameExposureAuto)
-                ? 'AUTO'
-                : shutterSpeed,
+            value: isNatural48Enabled || isExposureAuto ? 'AUTO' : shutterSpeed,
             enabled: !isNatural48Enabled,
           ),
           _pickerButton(
             type: SettingType.iso,
             label: 'ISO',
-            value:
-                isNatural48Enabled || (isFrameModeEnabled && frameExposureAuto)
+            value: isNatural48Enabled || isExposureAuto
                 ? 'AUTO'
                 : iso.toInt().toString(),
             enabled: !isNatural48Enabled,
@@ -301,7 +304,7 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.focus,
             label: 'FOCUS',
-            value: isNatural48Enabled || (isFrameModeEnabled && frameFocusAuto)
+            value: isNatural48Enabled || isFocusAuto
                 ? 'AF'
                 : focus.toStringAsFixed(2),
             enabled: !isNatural48Enabled,
