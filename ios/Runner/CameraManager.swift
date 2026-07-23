@@ -11,6 +11,7 @@ class CameraManager: NSObject {
     let session = AVCaptureSession()
     private var device: AVCaptureDevice?
     private var input: AVCaptureDeviceInput?
+    private weak var previewLayerForPointConversion: AVCaptureVideoPreviewLayer?
     private var photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
@@ -180,6 +181,31 @@ class CameraManager: NSObject {
         ]
     }
 
+    func registerPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
+        previewLayerForPointConversion = layer
+    }
+
+    private func devicePointFromPreview(normalizedX: CGFloat, normalizedY: CGFloat) -> CGPoint {
+        let convert: () -> CGPoint = {
+            guard let layer = self.previewLayerForPointConversion,
+                  layer.bounds.width > 0,
+                  layer.bounds.height > 0 else {
+                return CGPoint(x: normalizedX, y: normalizedY)
+            }
+
+            let layerPoint = CGPoint(
+                x: normalizedX * layer.bounds.width,
+                y: normalizedY * layer.bounds.height
+            )
+            return layer.captureDevicePointConverted(fromLayerPoint: layerPoint)
+        }
+
+        if Thread.isMainThread {
+            return convert()
+        }
+        return DispatchQueue.main.sync(execute: convert)
+    }
+
     // MARK: - Manual Controls
 
     func setISO(_ iso: Float, completion: @escaping (Bool) -> Void) {
@@ -248,10 +274,16 @@ class CameraManager: NSObject {
 
     func focusAtPoint(x: Float, y: Float, completion: @escaping (Bool) -> Void) {
         guard let d = device else { completion(false); return }
+        let normalizedX = max(0.0, min(CGFloat(x), 1.0))
+        let normalizedY = max(0.0, min(CGFloat(y), 1.0))
+        let point = devicePointFromPreview(
+            normalizedX: normalizedX,
+            normalizedY: normalizedY
+        )
+
         sessionQueue.async {
             do {
                 try d.lockForConfiguration()
-                let point = CGPoint(x: CGFloat(x), y: CGFloat(y))
                 if d.isFocusPointOfInterestSupported {
                     d.focusPointOfInterest = point
                     if d.isFocusModeSupported(.continuousAutoFocus) {

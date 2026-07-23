@@ -1,8 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// Native iOS AVFoundation camera preview.
-class NativeCameraPreview extends StatelessWidget {
+class NativeCameraPreview extends StatefulWidget {
   final String aspectRatio; // "4:3" | "16:9" | "1:1" | "3:2"
   final void Function(double x, double y)? onTap;
   final double softwareZoom;
@@ -13,6 +15,14 @@ class NativeCameraPreview extends StatelessWidget {
     this.onTap,
     this.softwareZoom = 1.0,
   });
+
+  @override
+  State<NativeCameraPreview> createState() => _NativeCameraPreviewState();
+}
+
+class _NativeCameraPreviewState extends State<NativeCameraPreview> {
+  Offset? _reticlePoint;
+  Timer? _reticleTimer;
 
   double _aspectValue(String label) {
     switch (label) {
@@ -28,18 +38,49 @@ class NativeCameraPreview extends StatelessWidget {
     }
   }
 
+  void _handleTap(TapDownDetails details, double width, double height) {
+    final localPoint = Offset(
+      details.localPosition.dx.clamp(0.0, width),
+      details.localPosition.dy.clamp(0.0, height),
+    );
+
+    setState(() => _reticlePoint = localPoint);
+    _reticleTimer?.cancel();
+    _reticleTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _reticlePoint = null);
+    });
+
+    if (widget.onTap == null) return;
+
+    final visibleX = localPoint.dx / width;
+    final visibleY = localPoint.dy / height;
+
+    // RAW mode previews are enlarged in Flutter. Convert the visible tap back
+    // into the underlying native preview coordinates before AVFoundation maps
+    // it to the camera sensor's focus/exposure coordinate system.
+    final visibleFraction = 1.0 / widget.softwareZoom;
+    final offsetFraction = (1.0 - visibleFraction) / 2.0;
+    final previewX = offsetFraction + (visibleX * visibleFraction);
+    final previewY = offsetFraction + (visibleY * visibleFraction);
+
+    widget.onTap!(previewX.clamp(0.0, 1.0), previewY.clamp(0.0, 1.0));
+  }
+
+  @override
+  void dispose() {
+    _reticleTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final target = _aspectValue(aspectRatio);
+    final target = _aspectValue(widget.aspectRatio);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Available screen space
         final availableW = constraints.maxWidth;
         final availableH = constraints.maxHeight;
 
-        // Compute preview box na tumutugma sa target aspect ratio
-        // Try width-constrained muna: kung sobra ang height, i-height-constrain natin
         double previewW = availableW;
         double previewH = previewW / target;
 
@@ -48,34 +89,55 @@ class NativeCameraPreview extends StatelessWidget {
           previewW = previewH * target;
         }
 
-        return Container(
+        return ColoredBox(
           color: Colors.black,
-          // === PROPER CENTERING via Center widget (fixes 16:9 na naka-taas issue) ===
           child: Center(
             child: SizedBox(
               width: previewW,
               height: previewH,
               child: ClipRect(
                 child: GestureDetector(
-                  onTapDown: (details) {
-                    if (onTap != null) {
-                      final rawX = details.localPosition.dx / previewW;
-                      final rawY = details.localPosition.dy / previewH;
-                      final visibleFraction = 1.0 / softwareZoom;
-                      final offsetFraction = (1.0 - visibleFraction) / 2.0;
-                      final cameraX = offsetFraction + (rawX * visibleFraction);
-                      final cameraY = offsetFraction + (rawY * visibleFraction);
-                      onTap!(cameraX.clamp(0.0, 1.0), cameraY.clamp(0.0, 1.0));
-                    }
-                  },
-                  child: Transform.scale(
-                    scale: softwareZoom,
-                    alignment: Alignment.center,
-                    child: const UiKitView(
-                      viewType: 'native_camera_preview',
-                      creationParams: null,
-                      creationParamsCodec: StandardMessageCodec(),
-                    ),
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (details) =>
+                      _handleTap(details, previewW, previewH),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Transform.scale(
+                        scale: widget.softwareZoom,
+                        alignment: Alignment.center,
+                        child: const UiKitView(
+                          viewType: 'native_camera_preview',
+                          creationParams: null,
+                          creationParamsCodec: StandardMessageCodec(),
+                        ),
+                      ),
+                      if (_reticlePoint != null)
+                        Positioned(
+                          left: _reticlePoint!.dx - 35,
+                          top: _reticlePoint!.dy - 35,
+                          child: IgnorePointer(
+                            child: TweenAnimationBuilder<double>(
+                              key: ValueKey(_reticlePoint),
+                              tween: Tween<double>(begin: 1.35, end: 1.0),
+                              duration: const Duration(milliseconds: 250),
+                              builder: (context, scale, child) =>
+                                  Transform.scale(scale: scale, child: child),
+                              child: Container(
+                                width: 70,
+                                height: 70,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.amber,
+                                    width: 2,
+                                  ),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),

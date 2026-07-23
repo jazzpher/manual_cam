@@ -44,6 +44,7 @@ class CameraPreviewView: NSObject, FlutterPlatformView {
         layer.frame = _view.bounds
         _view.layer.addSublayer(layer)
         previewLayer = layer
+        CameraManager.shared.registerPreviewLayer(layer)
 
         // Update layer frame on layout changes
         _view.layer.masksToBounds = true

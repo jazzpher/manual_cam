@@ -67,8 +67,6 @@ class _CameraScreenState extends State<CameraScreen> {
   String _aspectRatio = '4:3';
   bool _isCapturing = false;
 
-  Offset? _tapFocusPoint;
-
   // === ACTIVE DIAL STATE ===
   // Kung anong setting ang currently naka-open sa ruler dial
   SettingType _activeDial = SettingType.none;
@@ -339,7 +337,6 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _onPreviewTap(double x, double y) async {
     setState(() {
-      _tapFocusPoint = Offset(x, y);
       _isExposureAuto = true;
       _isFocusAuto = true;
       _exposureBias = 0.0;
@@ -361,10 +358,6 @@ class _CameraScreenState extends State<CameraScreen> {
         _focus = values['focus'] ?? _focus;
       });
     }
-
-    Future<void>.delayed(const Duration(milliseconds: 850), () {
-      if (mounted) setState(() => _tapFocusPoint = null);
-    });
   }
 
   Future<void> _capturePhoto() async {
@@ -471,8 +464,6 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
 
-          if (_tapFocusPoint != null) _buildFocusReticle(_tapFocusPoint!),
-
           Positioned(
             bottom: 0,
             left: 0,
@@ -547,31 +538,6 @@ class _CameraScreenState extends State<CameraScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildFocusReticle(Offset point) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Center(
-          child: TweenAnimationBuilder<double>(
-            key: ValueKey(point),
-            tween: Tween<double>(begin: 1.5, end: 1.0),
-            duration: const Duration(milliseconds: 300),
-            builder: (context, scale, _) => Transform.scale(
-              scale: scale,
-              child: Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.amber, width: 2),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }
