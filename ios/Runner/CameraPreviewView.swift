@@ -38,7 +38,9 @@ class CameraPreviewView: NSObject, FlutterPlatformView {
 
     private func setupPreviewLayer() {
         let layer = AVCaptureVideoPreviewLayer(session: CameraManager.shared.session)
-        layer.videoGravity = .resizeAspect // preserve aspect ratio, no distortion
+        // Fill Flutter's selected-ratio viewport. This removes the second set
+        // of black bars while preserving proportions (excess edges are cropped).
+        layer.videoGravity = .resizeAspectFill
         layer.frame = _view.bounds
         _view.layer.addSublayer(layer)
         previewLayer = layer

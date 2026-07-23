@@ -115,24 +115,6 @@ class NativeCamera {
     }
   }
 
-  Future<Map<String, double>> getCurrentCameraValues() async {
-    try {
-      final result = await _channel.invokeMethod('getCurrentCameraValues');
-      if (result is! Map) return {};
-
-      final values = <String, double>{};
-      result.forEach((key, value) {
-        if (key is String && value is num) {
-          values[key] = value.toDouble();
-        }
-      });
-      return values;
-    } catch (e) {
-      print('getCurrentCameraValues error: $e');
-      return {};
-    }
-  }
-
   Future<void> setFlashMode(String mode) async {
     try {
       await _channel.invokeMethod('setFlashMode', {'mode': mode});

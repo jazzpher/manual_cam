@@ -275,7 +275,8 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.shutter,
             label: 'SHUTTER',
-            value: isNatural48Enabled || (isFrameModeEnabled && frameExposureAuto)
+            value:
+                isNatural48Enabled || (isFrameModeEnabled && frameExposureAuto)
                 ? 'AUTO'
                 : shutterSpeed,
             enabled: !isNatural48Enabled,
@@ -283,7 +284,8 @@ class ControlsOverlay extends StatelessWidget {
           _pickerButton(
             type: SettingType.iso,
             label: 'ISO',
-            value: isNatural48Enabled || (isFrameModeEnabled && frameExposureAuto)
+            value:
+                isNatural48Enabled || (isFrameModeEnabled && frameExposureAuto)
                 ? 'AUTO'
                 : iso.toInt().toString(),
             enabled: !isNatural48Enabled,
