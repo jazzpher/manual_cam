@@ -133,14 +133,9 @@ class CameraManager: NSObject {
             }
 
             if newOrientation != self.currentPhysicalOrientation {
+                // Keep the live video connection fixed to avoid a pipeline flash.
+                // Rotate only the exported frame later in Core Image.
                 self.currentPhysicalOrientation = newOrientation
-                let videoOrientation = self.videoOrientation(for: newOrientation)
-                self.sessionQueue.async {
-                    if let connection = self.videoOutput.connection(with: .video),
-                       connection.isVideoOrientationSupported {
-                        connection.videoOrientation = videoOrientation
-                    }
-                }
             }
         }
     }
@@ -305,10 +300,9 @@ class CameraManager: NSObject {
             }
             self.session.commitConfiguration()
 
-            let orientation = self.videoOrientation(for: self.currentPhysicalOrientation)
             if let connection = self.videoOutput.connection(with: .video),
                connection.isVideoOrientationSupported {
-                connection.videoOrientation = orientation
+                connection.videoOrientation = .portrait
             }
 
             do {
@@ -602,6 +596,20 @@ class CameraManager: NSObject {
     ) {
         var image = CIImage(cvPixelBuffer: pixelBuffer)
         let orientation = currentPhysicalOrientation
+
+        // The live video connection stays portrait to prevent preview blinking.
+        // Rotate only the selected burst frame for the exported JPEG.
+        switch orientation {
+        case .portraitUpsideDown:
+            image = image.oriented(.down)
+        case .landscapeLeft:
+            image = image.oriented(.right)
+        case .landscapeRight:
+            image = image.oriented(.left)
+        default:
+            break
+        }
+
         let isPortrait = orientation == .portrait || orientation == .portraitUpsideDown
 
         let desiredLandscapeSize: CGSize

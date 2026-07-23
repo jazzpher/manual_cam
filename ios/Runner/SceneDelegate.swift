@@ -85,6 +85,8 @@ class SceneDelegate: FlutterSceneDelegate {
             case "setNatural48Mode":
                 let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
                 mgr.setNatural48Mode(enabled) { ok in result(ok) }
+            case "getCurrentCameraValues":
+                mgr.getCurrentCameraValues { values in result(values) }
             case "setFlashMode":
                 let mode = (call.arguments as? [String: Any])?["mode"] as? String ?? "off"
                 mgr.setFlashMode(mode)
