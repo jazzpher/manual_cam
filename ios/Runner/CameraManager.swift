@@ -913,8 +913,19 @@ class CameraManager: NSObject {
                 return
             }
 
-            guard let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes
-                .first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) else {
+            let availableRawFormats = self.photoOutput.availableRawPhotoPixelFormatTypes
+            let rawFormat: OSType?
+            if #available(iOS 14.3, *) {
+                rawFormat = availableRawFormats.first(where: {
+                    AVCapturePhotoOutput.isBayerRAWPixelFormat($0)
+                })
+            } else {
+                // Apple ProRAW did not exist before iOS 14.3, so an available
+                // RAW format on earlier supported systems is a Bayer RAW format.
+                rawFormat = availableRawFormats.first
+            }
+
+            guard let rawFormat else {
                 let error = NSError(
                     domain: "Camera",
                     code: 31,
