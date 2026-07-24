@@ -895,6 +895,164 @@ class CameraManager: NSObject {
     deinit {
         motionManager.stopAccelerometerUpdates()
     }
+
+    // MARK: - ProRAW Emulation
+
+    func captureProRawEmulation(completion: @escaping (Result<[String: String], Error>) -> Void) {
+        guard let rawFormat = photoOutput.availableRawPhotoPixelFormatTypes.first else {
+            completion(.failure(NSError(domain: "Camera", code: 30,
+                                        userInfo: [NSLocalizedDescriptionKey: "RAW not available"])))
+            return
+        }
+
+        let burstCount = 8
+        let burstDelegate = ProRawBurstDelegate(count: burstCount) { [weak self] buffers, error in
+            if let error = error {
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+            self?.processBurst(buffers ?? [], completion: completion)
+        }
+
+        for _ in 0..<burstCount {
+            let settings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat,
+                                                  processedFormat: nil)
+            settings.isHighResolutionPhotoEnabled = false
+            settings.isAutoStillImageStabilizationEnabled = false
+            if #available(iOS 13.0, *) {
+                settings.photoQualityPrioritization = .speed
+            }
+            photoOutput.capturePhoto(with: settings, delegate: burstDelegate)
+        }
+    }
+
+    private func processBurst(_ buffers: [CVPixelBuffer],
+                              completion: @escaping (Result<[String: String], Error>) -> Void) {
+        let count = buffers.count
+        guard count > 0, let first = buffers.first else {
+            completion(.failure(NSError(domain: "Camera", code: 32, userInfo: nil)))
+            return
+        }
+
+        let width = CVPixelBufferGetWidth(first)
+        let height = CVPixelBufferGetHeight(first)
+        let outFormat = CVPixelBufferGetPixelFormatType(first)
+
+        var outputBuffer: CVPixelBuffer?
+        CVPixelBufferCreate(kCFAllocatorDefault, width, height, outFormat, nil, &outputBuffer)
+        guard let outBuf = outputBuffer else {
+            completion(.failure(NSError(domain: "Camera", code: 33, userInfo: nil)))
+            return
+        }
+
+        for buf in buffers { CVPixelBufferLockBaseAddress(buf, .readOnly) }
+        CVPixelBufferLockBaseAddress(outBuf, [])
+
+        let outBase = CVPixelBufferGetBaseAddress(outBuf)!.assumingMemoryBound(to: UInt16.self)
+        let outBytesPerRow = CVPixelBufferGetBytesPerRow(outBuf) / 2
+
+        for y in 0..<height {
+            let rowOff = y * outBytesPerRow
+            for x in 0..<width {
+                var sum: UInt64 = 0
+                for buf in buffers {
+                    let srcPtr = CVPixelBufferGetBaseAddress(buf)!.assumingMemoryBound(to: UInt16.self)
+                    sum += UInt64(srcPtr[rowOff + x])
+                }
+                outBase[rowOff + x] = UInt16(sum / UInt64(count))
+            }
+        }
+
+        for buf in buffers { CVPixelBufferUnlockBaseAddress(buf, .readOnly) }
+        CVPixelBufferUnlockBaseAddress(outBuf, [])
+
+        let rawData = Data(bytesNoCopy: outBase, count: height * CVPixelBufferGetBytesPerRow(outBuf), deallocator: .none)
+        guard let rawFilter = CIFilter(imageData: rawData, options: [
+            kCIInputNeutralLocationKey: 0,
+            kCIInputLinearSpaceFilter: true,
+            kCIInputColorSpaceKey: CGColorSpace(name: CGColorSpace.displayP3)!,
+            kCIInputEnableSharpeningKey: false,
+            kCIInputEnableNoiseReductionKey: false
+        ]), let linearRGB = rawFilter.outputImage else {
+            completion(.failure(NSError(domain: "Camera", code: 34, userInfo: nil)))
+            return
+        }
+
+        writeLinearDNG(linearRGB) { dngPath in
+            guard let dngPath = dngPath else {
+                completion(.failure(NSError(domain: "Camera", code: 35, userInfo: nil)))
+                return
+            }
+            let result = ["dng": dngPath]
+            completion(.success(result))
+        }
+    }
+
+    private func writeLinearDNG(_ image: CIImage, completion: @escaping (String?) -> Void) {
+        let tmpDir = NSTemporaryDirectory()
+        let filename = "manualcam_proraw_\(Int(Date().timeIntervalSince1970)).dng"
+        let outputURL = URL(fileURLWithPath: tmpDir).appendingPathComponent(filename)
+
+        guard let dngDest = CGImageDestinationCreateWithURL(outputURL as CFURL, "public.dng" as CFString, 1, nil) else {
+            completion(nil)
+            return
+        }
+
+        let ciContext = CIContext()
+        guard let cgImage = ciContext.createCGImage(image, from: image.extent,
+                                                    format: .RGBA16,
+                                                    colorSpace: CGColorSpace(name: CGColorSpace.displayP3)!) else {
+            completion(nil)
+            return
+        }
+
+        let dngProps: [CFString: Any] = [
+            kCGImagePropertyDNGDictionary: [
+                kCGImagePropertyDNGVersion: [1, 6, 0, 0],
+                kCGImagePropertyDNGBayerGreenSplit: 1
+            ],
+            kCGImagePropertyDPIWidth: 72,
+            kCGImagePropertyDPIHeight: 72
+        ]
+
+        CGImageDestinationAddImage(dngDest, cgImage, dngProps as CFDictionary)
+        if CGImageDestinationFinalize(dngDest) {
+            completion(outputURL.path)
+        } else {
+            completion(nil)
+        }
+    }
+}
+
+// MARK: - ProRawBurstDelegate
+
+class ProRawBurstDelegate: NSObject, AVCapturePhotoCaptureDelegate {
+    private let expectedCount: Int
+    private var buffers: [CVPixelBuffer] = []
+    private let completion: (([CVPixelBuffer]?, Error?) -> Void)
+
+    init(count: Int, completion: @escaping (([CVPixelBuffer]?, Error?) -> Void)) {
+        self.expectedCount = count
+        self.completion = completion
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput,
+                     didFinishProcessingPhoto photo: AVCapturePhoto,
+                     error: Error?) {
+        if let error = error {
+            completion(nil, error)
+            return
+        }
+        guard let pixelBuffer = photo.pixelBuffer else {
+            completion(nil, NSError(domain: "Camera", code: 31,
+                                    userInfo: [NSLocalizedDescriptionKey: "No pixel buffer"]))
+            return
+        }
+        buffers.append(pixelBuffer)
+        if buffers.count == expectedCount {
+            completion(buffers, nil)
+        }
+    }
 }
 
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate

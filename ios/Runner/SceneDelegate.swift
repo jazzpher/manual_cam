@@ -112,6 +112,17 @@ class SceneDelegate: FlutterSceneDelegate {
                                             details: nil))
                     }
                 }
+            case "captureProRaw":
+                CameraManager.shared.captureProRawEmulation { r in
+                    switch r {
+                    case .success(let paths):
+                        result(paths)
+                    case .failure(let error):
+                        result(FlutterError(code: "PRORAW_FAIL",
+                                            message: error.localizedDescription,
+                                            details: nil))
+                    }
+                }
             default:
                 result(FlutterMethodNotImplemented)
             }
