@@ -968,12 +968,12 @@ class CameraManager: NSObject {
 
         let rawData = Data(bytesNoCopy: outBase, count: height * CVPixelBufferGetBytesPerRow(outBuf), deallocator: .none)
         guard let rawFilter = CIFilter(imageData: rawData, options: [
-    kCIInputNeutralLocationKey: 0,
-    kCIInputLinearSpaceFilter: true,
-    "inputColorSpace": CGColorSpace(name: CGColorSpace.displayP3)!,
-    kCIInputEnableSharpeningKey: false,
-    "inputEnableNoiseReduction": false
-]), let linearRGB = rawFilter.outputImage else {
+            kCIInputNeutralLocationKey: 0,
+            kCIInputLinearSpaceFilter: true,
+            kCIInputColorSpaceKey: CGColorSpace(name: CGColorSpace.displayP3)!,
+            kCIInputEnableSharpeningKey: false,
+            kCIInputEnableNoiseReductionKey: false
+        ]), let linearRGB = rawFilter.outputImage else {
             completion(.failure(NSError(domain: "Camera", code: 34, userInfo: nil)))
             return
         }
