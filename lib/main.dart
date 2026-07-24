@@ -58,7 +58,7 @@ class _CameraScreenState extends State<CameraScreen> {
   double _focus = 0.5;
   bool _isHDREnabled = false;
   bool _isRawEnabled = false;
-  bool _isRawTestEnabled = false;
+  bool _isRawBurstEnabled = false;
   bool _isNatural48Enabled = false;
   bool _isFrameModeEnabled = false;
   bool _isExposureAuto = true;
@@ -229,12 +229,12 @@ class _CameraScreenState extends State<CameraScreen> {
     }
     setState(() {
       _isRawEnabled = !_isRawEnabled;
-      _isRawTestEnabled = false; // RAW Test off if standard RAW is on
+      _isRawBurstEnabled = false; // RAW Burst off if standard RAW is on
     });
     await _camera.setRAW(_isRawEnabled);
   }
 
-  Future<void> _toggleRawTest() async {
+  Future<void> _toggleRawBurst() async {
     if (_isFrameModeEnabled) {
       await _camera.setFrameMode(false);
       setState(() => _isFrameModeEnabled = false);
@@ -248,11 +248,11 @@ class _CameraScreenState extends State<CameraScreen> {
       setState(() => _isRawEnabled = false);
     }
     setState(() {
-      _isRawTestEnabled = !_isRawTestEnabled;
+      _isRawBurstEnabled = !_isRawBurstEnabled;
       _isExposureAuto = true;
       _isFocusAuto = true;
     });
-    // The native captureRawTest method performs one RAW-only diagnostic capture.
+    // The native captureRawBurst method locks the camera and captures three RAW DNGs.
   }
 
   Future<void> _toggleFrameMode() async {
@@ -276,7 +276,7 @@ class _CameraScreenState extends State<CameraScreen> {
       _isFocusAuto = true;
       _isNatural48Enabled = false;
       _isRawEnabled = false;
-      _isRawTestEnabled = false;
+      _isRawBurstEnabled = false;
       _isHDREnabled = false;
       _flashMode = 'off';
       _zoom = 1.0;
@@ -336,7 +336,7 @@ class _CameraScreenState extends State<CameraScreen> {
       _isExposureAuto = true;
       _isFocusAuto = true;
       _isRawEnabled = false;
-      _isRawTestEnabled = false;
+      _isRawBurstEnabled = false;
       _isHDREnabled = false;
       _flashMode = 'off';
       _exposureBias = 0.0;
@@ -392,11 +392,11 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() => _isCapturing = true);
 
     try {
-      final paths = _isRawTestEnabled
-          ? await _camera.captureRawTest()
+      final paths = _isRawBurstEnabled
+          ? await _camera.captureRawBurst()
           : _isFrameModeEnabled
-              ? await _camera.captureVideoFrame(_aspectRatio)
-              : await _camera.capturePhoto();
+          ? await _camera.captureVideoFrame(_aspectRatio)
+          : await _camera.capturePhoto();
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
@@ -404,13 +404,16 @@ class _CameraScreenState extends State<CameraScreen> {
         final zoomLabel = zoom == '1.0' ? '' : ' (${zoom}x)';
 
         String message;
-        if (_isRawTestEnabled) {
+        if (_isRawBurstEnabled) {
           final width = paths['width'];
           final height = paths['height'];
           final format = paths['pixelFormat'] ?? paths['rawFormat'];
-          final sizeLabel = width != null && height != null ? ' · ${width}x$height' : '';
+          final sizeLabel = width != null && height != null
+              ? ' · ${width}x$height'
+              : '';
           final formatLabel = format != null ? ' · $format' : '';
-          message = '🧪 RAW TEST DNG saved$sizeLabel$formatLabel';
+          final count = paths['count'] ?? '3';
+          message = '🧪 RAW BURST saved · $count DNGs$sizeLabel$formatLabel';
         } else if (_isFrameModeEnabled) {
           message = '🎞️ 4K video frame saved$zoomLabel';
         } else if (paths.containsKey('raw')) {
@@ -445,8 +448,8 @@ class _CameraScreenState extends State<CameraScreen> {
 
   String _modeLabel() {
     final parts = <String>[];
-    if (_isRawTestEnabled) {
-      parts.add('RAW TEST');
+    if (_isRawBurstEnabled) {
+      parts.add('RAW BURST');
     } else if (_isRawEnabled) {
       parts.add('RAW+JPEG');
     } else {
@@ -536,7 +539,7 @@ class _CameraScreenState extends State<CameraScreen> {
             flashMode: _flashMode,
             isHDREnabled: _isHDREnabled,
             isRawEnabled: _isRawEnabled,
-            isRawTestEnabled: _isRawTestEnabled,
+            isRawBurstEnabled: _isRawBurstEnabled,
             isNatural48Enabled: _isNatural48Enabled,
             isFrameModeEnabled: _isFrameModeEnabled,
             isExposureAuto: _isExposureAuto,
@@ -555,7 +558,7 @@ class _CameraScreenState extends State<CameraScreen> {
             onCapture: _capturePhoto,
             onToggleHDR: _toggleHDR,
             onToggleRAW: _toggleRAW,
-            onToggleRawTest: _toggleRawTest,
+            onToggleRawBurst: _toggleRawBurst,
             onToggleNatural48: _toggleNatural48,
             onToggleFrameMode: _toggleFrameMode,
           ),

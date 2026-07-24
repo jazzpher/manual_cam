@@ -11,7 +11,7 @@ class ControlsOverlay extends StatelessWidget {
   final List<String> aspectRatios;
   final bool isHDREnabled,
       isRawEnabled,
-      isRawTestEnabled,
+      isRawBurstEnabled,
       isNatural48Enabled,
       isFrameModeEnabled,
       isExposureAuto,
@@ -29,7 +29,7 @@ class ControlsOverlay extends StatelessWidget {
   final VoidCallback onCapture,
       onToggleHDR,
       onToggleRAW,
-      onToggleRawTest,
+      onToggleRawBurst,
       onToggleNatural48,
       onToggleFrameMode;
 
@@ -49,7 +49,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.flashMode,
     required this.isHDREnabled,
     required this.isRawEnabled,
-    required this.isRawTestEnabled,
+    required this.isRawBurstEnabled,
     required this.isNatural48Enabled,
     required this.isFrameModeEnabled,
     required this.isExposureAuto,
@@ -68,7 +68,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onCapture,
     required this.onToggleHDR,
     required this.onToggleRAW,
-    required this.onToggleRawTest,
+    required this.onToggleRawBurst,
     required this.onToggleNatural48,
     required this.onToggleFrameMode,
   });
@@ -166,12 +166,12 @@ class ControlsOverlay extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           GestureDetector(
-            onTap: onToggleRawTest,
+            onTap: onToggleRawBurst,
             child: _rotate(
               _pill(
                 icon: Icons.science_outlined,
-                label: 'RTEST',
-                color: isRawTestEnabled ? Colors.amber : Colors.grey,
+                label: 'RBURST',
+                color: isRawBurstEnabled ? Colors.amber : Colors.grey,
               ),
             ),
           ),

@@ -36,6 +36,7 @@ class CameraManager: NSObject {
     private var flashMode: AVCaptureDevice.FlashMode = .off
     private var lastPhotoCompletion: ((Result<[String: String], Error>) -> Void)?
     private var rawTestDelegate: RawTestCaptureDelegate?
+    private var rawBurstControlState: RawBurstControlState?
 
     private var pendingRawURL: String?
     private var pendingJpegURL: String?
@@ -895,6 +896,168 @@ class CameraManager: NSObject {
 
     deinit {
         motionManager.stopAccelerometerUpdates()
+    }
+
+    // MARK: - Temporary RAW burst controls lock
+
+    private struct RawBurstControlState {
+        let exposureMode: AVCaptureDevice.ExposureMode
+        let exposureDuration: CMTime
+        let iso: Float
+        let exposureBias: Float
+        let focusMode: AVCaptureDevice.FocusMode
+        let lensPosition: Float
+        let whiteBalanceMode: AVCaptureDevice.WhiteBalanceMode
+        let whiteBalanceGains: AVCaptureDevice.WhiteBalanceGains
+    }
+
+    func beginRawBurstLock(completion: @escaping (Bool) -> Void) {
+        sessionQueue.async {
+            self.waitForRawBurstStability(attempt: 0, completion: completion)
+        }
+    }
+
+    private func waitForRawBurstStability(
+        attempt: Int,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard let d = device else {
+            DispatchQueue.main.async { completion(false) }
+            return
+        }
+
+        let adjusting = d.isAdjustingExposure ||
+            d.isAdjustingFocus ||
+            d.isAdjustingWhiteBalance
+        if adjusting && attempt < 20 {
+            sessionQueue.asyncAfter(deadline: .now() + 0.05) {
+                self.waitForRawBurstStability(
+                    attempt: attempt + 1,
+                    completion: completion
+                )
+            }
+            return
+        }
+
+        let state = RawBurstControlState(
+            exposureMode: d.exposureMode,
+            exposureDuration: d.exposureDuration,
+            iso: d.iso,
+            exposureBias: d.exposureTargetBias,
+            focusMode: d.focusMode,
+            lensPosition: d.lensPosition,
+            whiteBalanceMode: d.whiteBalanceMode,
+            whiteBalanceGains: d.deviceWhiteBalanceGains
+        )
+
+        do {
+            try d.lockForConfiguration()
+            if d.isExposureModeSupported(.custom) {
+                d.setExposureModeCustom(
+                    duration: state.exposureDuration,
+                    iso: state.iso,
+                    completionHandler: nil
+                )
+            }
+            if d.isLockingFocusWithCustomLensPositionSupported {
+                d.setFocusModeLocked(
+                    lensPosition: state.lensPosition,
+                    completionHandler: nil
+                )
+            }
+            if d.isWhiteBalanceModeSupported(.locked) {
+                d.setWhiteBalanceModeLocked(
+                    with: clampedBurstWhiteBalanceGains(
+                        state.whiteBalanceGains,
+                        device: d
+                    ),
+                    completionHandler: nil
+                )
+            }
+            d.unlockForConfiguration()
+            rawBurstControlState = state
+
+            sessionQueue.asyncAfter(deadline: .now() + 0.15) {
+                DispatchQueue.main.async { completion(true) }
+            }
+        } catch {
+            print("RAW burst lock failed: \(error)")
+            DispatchQueue.main.async { completion(false) }
+        }
+    }
+
+    func endRawBurstLock(completion: @escaping (Bool) -> Void) {
+        sessionQueue.async {
+            guard let d = self.device,
+                  let state = self.rawBurstControlState else {
+                DispatchQueue.main.async { completion(true) }
+                return
+            }
+
+            do {
+                try d.lockForConfiguration()
+                if state.exposureMode == .custom,
+                   d.isExposureModeSupported(.custom) {
+                    d.setExposureModeCustom(
+                        duration: state.exposureDuration,
+                        iso: state.iso,
+                        completionHandler: nil
+                    )
+                } else if d.isExposureModeSupported(state.exposureMode) {
+                    d.exposureMode = state.exposureMode
+                }
+
+                if state.focusMode == .locked,
+                   d.isLockingFocusWithCustomLensPositionSupported {
+                    d.setFocusModeLocked(
+                        lensPosition: state.lensPosition,
+                        completionHandler: nil
+                    )
+                } else if d.isFocusModeSupported(state.focusMode) {
+                    d.focusMode = state.focusMode
+                }
+
+                if state.whiteBalanceMode == .locked,
+                   d.isWhiteBalanceModeSupported(.locked) {
+                    d.setWhiteBalanceModeLocked(
+                        with: self.clampedBurstWhiteBalanceGains(
+                            state.whiteBalanceGains,
+                            device: d
+                        ),
+                        completionHandler: nil
+                    )
+                } else if d.isWhiteBalanceModeSupported(state.whiteBalanceMode) {
+                    d.whiteBalanceMode = state.whiteBalanceMode
+                }
+
+                if d.minExposureTargetBias <= state.exposureBias,
+                   state.exposureBias <= d.maxExposureTargetBias {
+                    d.setExposureTargetBias(
+                        state.exposureBias,
+                        completionHandler: nil
+                    )
+                }
+                d.unlockForConfiguration()
+                self.rawBurstControlState = nil
+                DispatchQueue.main.async { completion(true) }
+            } catch {
+                print("RAW burst restore failed: \(error)")
+                self.rawBurstControlState = nil
+                DispatchQueue.main.async { completion(false) }
+            }
+        }
+    }
+
+    private func clampedBurstWhiteBalanceGains(
+        _ gains: AVCaptureDevice.WhiteBalanceGains,
+        device: AVCaptureDevice
+    ) -> AVCaptureDevice.WhiteBalanceGains {
+        let maximum = device.maxWhiteBalanceGain
+        return AVCaptureDevice.WhiteBalanceGains(
+            redGain: max(1.0, min(gains.redGain, maximum)),
+            greenGain: max(1.0, min(gains.greenGain, maximum)),
+            blueGain: max(1.0, min(gains.blueGain, maximum))
+        )
     }
 
     // MARK: - Bayer RAW Validation Capture

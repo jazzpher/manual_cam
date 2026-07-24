@@ -112,6 +112,10 @@ class SceneDelegate: FlutterSceneDelegate {
                                             details: nil))
                     }
                 }
+            case "beginRawBurstLock":
+                mgr.beginRawBurstLock { ok in result(ok) }
+            case "endRawBurstLock":
+                mgr.endRawBurstLock { ok in result(ok) }
             case "captureRawTest":
                 mgr.captureRawTest { r in
                     switch r {
