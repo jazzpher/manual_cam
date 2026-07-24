@@ -413,7 +413,13 @@ class _CameraScreenState extends State<CameraScreen> {
               : '';
           final formatLabel = format != null ? ' · $format' : '';
           final count = paths['count'] ?? '3';
-          message = '🧪 RAW BURST saved · $count DNGs$sizeLabel$formatLabel';
+          final mergeLabel = paths['enhancedJpeg'] != null
+              ? ' + enhanced JPEG'
+              : paths['mergeError'] != null
+              ? ' · merge preview failed'
+              : '';
+          message =
+              '🧪 RAW BURST saved · $count DNGs$mergeLabel$sizeLabel$formatLabel';
         } else if (_isFrameModeEnabled) {
           message = '🎞️ 4K video frame saved$zoomLabel';
         } else if (paths.containsKey('raw')) {

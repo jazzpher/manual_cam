@@ -116,6 +116,21 @@ class SceneDelegate: FlutterSceneDelegate {
                 mgr.beginRawBurstLock { ok in result(ok) }
             case "endRawBurstLock":
                 mgr.endRawBurstLock { ok in result(ok) }
+            case "mergeRawBurstPreview":
+                let args = call.arguments as? [String: Any] ?? [:]
+                let paths = args["paths"] as? [String] ?? []
+                mgr.mergeRawBurstPreview(dngPaths: paths) { r in
+                    switch r {
+                    case .success(let details):
+                        result(details)
+                    case .failure(let error):
+                        result(FlutterError(
+                            code: "RAW_MERGE_FAIL",
+                            message: error.localizedDescription,
+                            details: nil
+                        ))
+                    }
+                }
             case "captureRawTest":
                 mgr.captureRawTest { r in
                     switch r {

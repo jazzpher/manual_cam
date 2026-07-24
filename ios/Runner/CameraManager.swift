@@ -4,6 +4,7 @@ import Flutter
 import Photos
 import CoreMotion
 import CoreImage
+import Vision
 
 class CameraManager: NSObject {
     static let shared = CameraManager()
@@ -52,6 +53,11 @@ class CameraManager: NSObject {
 
     // Core Image context — reusable, Metal GPU-accelerated
     // Configured for wide-gamut Display P3 frame rendering
+    private let rawMergeQueue = DispatchQueue(
+        label: "camera.raw.merge.queue",
+        qos: .userInitiated
+    )
+
     private let ciContext: CIContext = {
         return CIContext(options: [
             .useSoftwareRenderer: false,
@@ -891,6 +897,259 @@ class CameraManager: NSObject {
         } catch {
             print("⚠️ Failed to save software-zoom JPEG: \(error)")
             return nil
+        }
+    }
+
+
+    // MARK: - RAW Burst Enhanced JPEG Preview
+
+    func mergeRawBurstPreview(
+        dngPaths: [String],
+        completion: @escaping (Result<[String: String], Error>) -> Void
+    ) {
+        rawMergeQueue.async {
+            do {
+                guard dngPaths.count >= 2 else {
+                    throw NSError(
+                        domain: "Camera",
+                        code: 40,
+                        userInfo: [NSLocalizedDescriptionKey: "At least two DNG paths are required"]
+                    )
+                }
+
+                let urls = dngPaths.map { URL(fileURLWithPath: $0) }
+                let images = try urls.map { try self.loadRawCIImage(from: $0) }
+                let reference = images[0]
+                let referenceExtent = reference.extent
+
+                var alignedImages: [CIImage] = [reference]
+                var alignmentSummary: [String] = []
+
+                for index in 1..<images.count {
+                    let transform = self.estimateTranslationTransform(
+                        moving: images[index],
+                        reference: reference
+                    ) ?? .identity
+
+                    let aligned = images[index]
+                        .transformed(by: transform)
+                        .cropped(to: referenceExtent)
+                    alignedImages.append(aligned)
+
+                    alignmentSummary.append(
+                        String(
+                            format: "%d:%.2f,%.2f",
+                            index + 1,
+                            transform.tx,
+                            transform.ty
+                        )
+                    )
+                }
+
+                let merged = self.averageCIImages(alignedImages)
+                    .cropped(to: referenceExtent)
+
+                let outputURL = try self.renderMergedJPEG(
+                    merged,
+                    extent: referenceExtent
+                )
+
+                self.saveJPEGToPhotos(fileURL: outputURL) { result in
+                    switch result {
+                    case .success:
+                        let details: [String: String] = [
+                            "enhancedJpeg": outputURL.path,
+                            "mergeCount": String(alignedImages.count),
+                            "alignment": alignmentSummary.joined(separator: ";")
+                        ]
+                        completion(.success(details))
+                    case .failure(let error):
+                        completion(.failure(error))
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+
+    private func loadRawCIImage(from url: URL) throws -> CIImage {
+        let options: [CIImageOption: Any] = [
+            .applyOrientationProperty: true
+        ]
+
+        if let image = CIImage(contentsOf: url, options: options) {
+            return image.transformed(
+                by: CGAffineTransform(
+                    translationX: -image.extent.origin.x,
+                    y: -image.extent.origin.y
+                )
+            )
+        }
+
+        throw NSError(
+            domain: "Camera",
+            code: 41,
+            userInfo: [NSLocalizedDescriptionKey: "Unable to decode RAW DNG: \(url.lastPathComponent)"]
+        )
+    }
+
+    private func estimateTranslationTransform(
+        moving: CIImage,
+        reference: CIImage
+    ) -> CGAffineTransform? {
+        let maxSide: CGFloat = 900.0
+        guard let referenceCG = makeRegistrationCGImage(from: reference, maxSide: maxSide),
+              let movingCG = makeRegistrationCGImage(from: moving, maxSide: maxSide) else {
+            return nil
+        }
+
+        do {
+            let request = VNTranslationalImageRegistrationRequest(
+                targetedCGImage: referenceCG
+            )
+            let handler = VNImageRequestHandler(cgImage: movingCG, options: [:])
+            try handler.perform([request])
+
+            guard let observation = request.results?.first as? VNImageTranslationAlignmentObservation else {
+                return nil
+            }
+
+            let scale = min(
+                maxSide / max(reference.extent.width, reference.extent.height),
+                1.0
+            )
+            var transform = observation.alignmentTransform
+            if scale > 0 {
+                transform.tx /= scale
+                transform.ty /= scale
+            }
+            return transform
+        } catch {
+            print("RAW merge alignment failed: \(error)")
+            return nil
+        }
+    }
+
+    private func makeRegistrationCGImage(
+        from image: CIImage,
+        maxSide: CGFloat
+    ) -> CGImage? {
+        let extent = image.extent
+        let scale = min(maxSide / max(extent.width, extent.height), 1.0)
+        let resized = image
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            .applyingFilter("CIPhotoEffectMono")
+
+        return ciContext.createCGImage(resized, from: resized.extent)
+    }
+
+    private func averageCIImages(_ images: [CIImage]) -> CIImage {
+        let weight = 1.0 / CGFloat(max(images.count, 1))
+        var accumulated = scaleCIImage(images[0], by: weight)
+
+        for image in images.dropFirst() {
+            let scaled = scaleCIImage(image, by: weight)
+            accumulated = scaled.applyingFilter(
+                "CIAdditionCompositing",
+                parameters: [kCIInputBackgroundImageKey: accumulated]
+            )
+        }
+
+        return accumulated
+    }
+
+    private func scaleCIImage(_ image: CIImage, by value: CGFloat) -> CIImage {
+        return image.applyingFilter(
+            "CIColorMatrix",
+            parameters: [
+                "inputRVector": CIVector(x: value, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: value, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: value, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1)
+            ]
+        )
+    }
+
+    private func renderMergedJPEG(_ image: CIImage, extent: CGRect) throws -> URL {
+        guard let cgImage = ciContext.createCGImage(image, from: extent) else {
+            throw NSError(
+                domain: "Camera",
+                code: 42,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to render merged RAW preview"]
+            )
+        }
+
+        let uiImage = UIImage(cgImage: cgImage)
+        guard let jpegData = uiImage.jpegData(compressionQuality: 0.96) else {
+            throw NSError(
+                domain: "Camera",
+                code: 43,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to encode merged JPEG"]
+            )
+        }
+
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let filename = "manualcam_\(timestamp)_raw_burst_merged.jpg"
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(filename)
+        try jpegData.write(to: url, options: .atomic)
+        return url
+    }
+
+    private func saveJPEGToPhotos(
+        fileURL: URL,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        let save: () -> Void = {
+            PHPhotoLibrary.shared().performChanges({
+                let request = PHAssetCreationRequest.forAsset()
+                let options = PHAssetResourceCreationOptions()
+                options.shouldMoveFile = false
+                request.addResource(with: .photo, fileURL: fileURL, options: options)
+            }) { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        completion(.success(()))
+                    } else {
+                        completion(.failure(error ?? NSError(
+                            domain: "Camera",
+                            code: 44,
+                            userInfo: [NSLocalizedDescriptionKey: "Unable to save merged JPEG to Photos"]
+                        )))
+                    }
+                }
+            }
+        }
+
+        if #available(iOS 14.0, *) {
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                if status == .authorized || status == .limited {
+                    save()
+                } else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(
+                            domain: "Camera",
+                            code: 45,
+                            userInfo: [NSLocalizedDescriptionKey: "Photos add permission was denied"]
+                        )))
+                    }
+                }
+            }
+        } else {
+            PHPhotoLibrary.requestAuthorization { status in
+                if status == .authorized {
+                    save()
+                } else {
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(
+                            domain: "Camera",
+                            code: 45,
+                            userInfo: [NSLocalizedDescriptionKey: "Photos add permission was denied"]
+                        )))
+                    }
+                }
+            }
         }
     }
 
