@@ -946,7 +946,7 @@ class CameraManager: NSObject {
                     )
                 }
 
-                let merged = self.averageCIImages(alignedImages)
+                let merged = self.weightedSharpRawBurstMerge(alignedImages)
                     .cropped(to: referenceExtent)
 
                 let outputURL = try self.renderMergedJPEG(
@@ -1044,19 +1044,50 @@ class CameraManager: NSObject {
         return ciContext.createCGImage(resized, from: resized.extent)
     }
 
-    private func averageCIImages(_ images: [CIImage]) -> CIImage {
-        let weight = 1.0 / CGFloat(max(images.count, 1))
-        var accumulated = scaleCIImage(images[0], by: weight)
+    private func weightedSharpRawBurstMerge(_ images: [CIImage]) -> CIImage {
+        guard let reference = images.first else {
+            return CIImage.empty()
+        }
+
+        // Reference-heavy merge for handheld/low-light bursts. Equal averaging
+        // lowers noise more, but it also makes 1/15s handheld captures look
+        // muddy when there is small residual movement. This keeps frame 1 as
+        // the sharp detail anchor while frames 2/3 contribute mild denoising.
+        let referenceWeight: CGFloat = 0.70
+        let remainingWeight = max(0.0, 1.0 - referenceWeight)
+        let extraCount = max(images.count - 1, 1)
+        let extraWeight = remainingWeight / CGFloat(extraCount)
+
+        var accumulated = scaleCIImage(reference, by: referenceWeight)
 
         for image in images.dropFirst() {
-            let scaled = scaleCIImage(image, by: weight)
+            let scaled = scaleCIImage(image, by: extraWeight)
             accumulated = scaled.applyingFilter(
                 "CIAdditionCompositing",
                 parameters: [kCIInputBackgroundImageKey: accumulated]
             )
         }
 
-        return accumulated
+        return sharpenMergedPreview(accumulated)
+    }
+
+    private func sharpenMergedPreview(_ image: CIImage) -> CIImage {
+        // Moderate RAW-preview sharpening. Avoid heavy halos; this is only the
+        // enhanced preview while the untouched DNGs remain the primary files.
+        let sharpened = image.applyingFilter(
+            "CISharpenLuminance",
+            parameters: [
+                kCIInputSharpnessKey: 0.65
+            ]
+        )
+
+        return sharpened.applyingFilter(
+            "CIUnsharpMask",
+            parameters: [
+                kCIInputRadiusKey: 1.2,
+                kCIInputIntensityKey: 0.35
+            ]
+        )
     }
 
     private func scaleCIImage(_ image: CIImage, by value: CGFloat) -> CIImage {
