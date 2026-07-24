@@ -1,4 +1,4 @@
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:gal/gal.dart';
 
@@ -37,7 +37,7 @@ class NativeCamera {
       if (result == null) throw Exception('Setup returned null');
       _capabilities = result.map((k, v) => MapEntry(k.toString(), v));
       _initialized = true;
-      print('âœ… Native camera setup complete');
+      print('Ã¢Å“â€¦ Native camera setup complete');
     } on PlatformException catch (e) {
       throw Exception('Native camera setup failed: ${e.message}');
     }
@@ -213,7 +213,7 @@ class NativeCamera {
           await Gal.putImage(paths['raw']!, album: 'ManualCam');
         }
       } catch (e) {
-        print('âŒ Photos save error: $e');
+        print('Ã¢ÂÅ’ Photos save error: $e');
       }
 
       paths['zoom'] = softwareZoom.toStringAsFixed(1);
@@ -265,13 +265,18 @@ class NativeCamera {
         throw Exception('Unable to lock camera controls for RAW burst');
       }
 
+      final dngPaths = <String>[];
+
       for (var i = 1; i <= 3; i++) {
         final frame = await captureRawTest();
         final suffix = i.toString().padLeft(2, '0');
 
+        final dngPath = frame['dng'] ?? frame['raw'];
+        if (dngPath != null) dngPaths.add(dngPath);
+
         for (final entry in frame.entries) {
-          if (entry.key == 'raw') {
-            merged['raw$suffix'] = entry.value;
+          if (entry.key == 'raw' || entry.key == 'dng') {
+            merged['dng$suffix'] = entry.value;
           } else {
             merged['${entry.key}$suffix'] = entry.value;
           }
@@ -285,6 +290,7 @@ class NativeCamera {
             'rawFormat',
             'pixelFormat',
             'dngBytes',
+            'fileBytes',
           ]) {
             final value = frame[key];
             if (value != null) merged[key] = value;
@@ -292,6 +298,36 @@ class NativeCamera {
         }
 
         merged['count'] = i.toString();
+      }
+
+      if (lockStarted) {
+        try {
+          await _channel.invokeMethod('endRawBurstLock');
+        } catch (e) {
+          print('endRawBurstLock error: $e');
+        }
+        lockStarted = false;
+      }
+
+      if (dngPaths.length >= 2) {
+        try {
+          final mergeResult = await _channel.invokeMethod(
+            'mergeRawBurstPreview',
+            {'paths': dngPaths},
+          );
+          if (mergeResult is Map) {
+            mergeResult.forEach((k, v) {
+              if (k is String && v is String) {
+                merged[k] = v;
+              }
+            });
+          }
+        } catch (e) {
+          // The three untouched DNGs are the primary output. If preview merging
+          // fails, return the DNG burst and surface the merge error for UI/debug.
+          merged['mergeError'] = e.toString();
+          print('RAW burst merge preview error: $e');
+        }
       }
 
       return merged;
