@@ -240,17 +240,8 @@ class NativeCamera {
 
       if (paths.isEmpty) throw Exception('No files created');
 
-      // Save DNG to Photos
-      if (paths['dng'] != null) {
-        try {
-          final hasAccess = await Gal.hasAccess(toAlbum: true);
-          if (!hasAccess) await Gal.requestAccess(toAlbum: true);
-          await Gal.putImage(paths['dng']!, album: 'ManualCam');
-        } catch (e) {
-          print('❌ Photos save error: $e');
-        }
-      }
-
+      // The DNG is saved natively using PhotoKit. Gal is intentionally not
+      // used here because generic image writers may not safely handle DNG files.
       return paths;
     } on PlatformException catch (e) {
       throw Exception('RAW test capture failed: ${e.message}');

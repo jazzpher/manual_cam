@@ -953,7 +953,9 @@ class CameraManager: NSObject {
             settings.isHighResolutionPhotoEnabled = false
             settings.isAutoStillImageStabilizationEnabled = false
             if #available(iOS 13.0, *) {
-                settings.photoQualityPrioritization = .quality
+                // RAW capture does not use Apple's fused quality pipeline.
+                // Match the known-working standard RAW configuration.
+                settings.photoQualityPrioritization = .speed
             }
 
             self.photoOutput.capturePhoto(with: settings, delegate: delegate)
@@ -1029,7 +1031,67 @@ final class RawTestCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
         }
 
         print("✅ RAW TEST: \(details)")
-        completion(.success(details))
+        saveDNGToPhotos(fileURL: URL(fileURLWithPath: path), details: details)
+    }
+
+    private func saveDNGToPhotos(
+        fileURL: URL,
+        details: [String: String]
+    ) {
+        let save: () -> Void = {
+            PHPhotoLibrary.shared().performChanges({
+                let request = PHAssetCreationRequest.forAsset()
+                let options = PHAssetResourceCreationOptions()
+                options.shouldMoveFile = false
+                request.addResource(
+                    with: .photo,
+                    fileURL: fileURL,
+                    options: options
+                )
+            }) { success, error in
+                if success {
+                    self.completion(.success(details))
+                } else {
+                    self.completion(.failure(error ?? NSError(
+                        domain: "Camera",
+                        code: 33,
+                        userInfo: [
+                            NSLocalizedDescriptionKey: "Unable to save DNG to Photos"
+                        ]
+                    )))
+                }
+            }
+        }
+
+        if #available(iOS 14.0, *) {
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                if status == .authorized || status == .limited {
+                    save()
+                } else {
+                    self.completion(.failure(NSError(
+                        domain: "Camera",
+                        code: 34,
+                        userInfo: [
+                            NSLocalizedDescriptionKey: "Photos add permission was denied"
+                        ]
+                    )))
+                }
+            }
+        } else {
+            PHPhotoLibrary.requestAuthorization { status in
+                if status == .authorized {
+                    save()
+                } else {
+                    self.completion(.failure(NSError(
+                        domain: "Camera",
+                        code: 34,
+                        userInfo: [
+                            NSLocalizedDescriptionKey: "Photos permission was denied"
+                        ]
+                    )))
+                }
+            }
+        }
     }
 
     private static func fourCC(_ value: OSType) -> String {
