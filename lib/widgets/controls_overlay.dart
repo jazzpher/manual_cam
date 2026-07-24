@@ -11,7 +11,6 @@ class ControlsOverlay extends StatelessWidget {
   final List<String> aspectRatios;
   final bool isHDREnabled,
       isRawEnabled,
-      isProRawEnabled,
       isNatural48Enabled,
       isFrameModeEnabled,
       isExposureAuto,
@@ -29,7 +28,6 @@ class ControlsOverlay extends StatelessWidget {
   final VoidCallback onCapture,
       onToggleHDR,
       onToggleRAW,
-      onToggleProRAW,
       onToggleNatural48,
       onToggleFrameMode;
 
@@ -49,7 +47,6 @@ class ControlsOverlay extends StatelessWidget {
     required this.flashMode,
     required this.isHDREnabled,
     required this.isRawEnabled,
-    required this.isProRawEnabled,
     required this.isNatural48Enabled,
     required this.isFrameModeEnabled,
     required this.isExposureAuto,
@@ -68,7 +65,6 @@ class ControlsOverlay extends StatelessWidget {
     required this.onCapture,
     required this.onToggleHDR,
     required this.onToggleRAW,
-    required this.onToggleProRAW,
     required this.onToggleNatural48,
     required this.onToggleFrameMode,
   });
@@ -161,17 +157,6 @@ class ControlsOverlay extends StatelessWidget {
               _pill(
                 label: 'RAW',
                 color: isRawEnabled ? Colors.amber : Colors.grey,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          GestureDetector(
-            onTap: onToggleProRAW,
-            child: _rotate(
-              _pill(
-                icon: Icons.auto_awesome,
-                label: 'PRO',
-                color: isProRawEnabled ? Colors.amber : Colors.grey,
               ),
             ),
           ),
