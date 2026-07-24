@@ -112,6 +112,19 @@ class SceneDelegate: FlutterSceneDelegate {
                                             details: nil))
                     }
                 }
+            case "captureRawTest":
+                mgr.captureRawTest { r in
+                    switch r {
+                    case .success(let paths):
+                        result(paths)
+                    case .failure(let error):
+                        result(FlutterError(
+                            code: "RAW_TEST_FAIL",
+                            message: error.localizedDescription,
+                            details: nil
+                        ))
+                    }
+                }
             default:
                 result(FlutterMethodNotImplemented)
             }

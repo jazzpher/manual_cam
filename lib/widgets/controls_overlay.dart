@@ -11,6 +11,7 @@ class ControlsOverlay extends StatelessWidget {
   final List<String> aspectRatios;
   final bool isHDREnabled,
       isRawEnabled,
+      isRawTestEnabled,
       isNatural48Enabled,
       isFrameModeEnabled,
       isExposureAuto,
@@ -28,6 +29,7 @@ class ControlsOverlay extends StatelessWidget {
   final VoidCallback onCapture,
       onToggleHDR,
       onToggleRAW,
+      onToggleRawTest,
       onToggleNatural48,
       onToggleFrameMode;
 
@@ -47,6 +49,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.flashMode,
     required this.isHDREnabled,
     required this.isRawEnabled,
+    required this.isRawTestEnabled,
     required this.isNatural48Enabled,
     required this.isFrameModeEnabled,
     required this.isExposureAuto,
@@ -65,6 +68,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onCapture,
     required this.onToggleHDR,
     required this.onToggleRAW,
+    required this.onToggleRawTest,
     required this.onToggleNatural48,
     required this.onToggleFrameMode,
   });
@@ -162,6 +166,17 @@ class ControlsOverlay extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           GestureDetector(
+            onTap: onToggleRawTest,
+            child: _rotate(
+              _pill(
+                icon: Icons.science_outlined,
+                label: 'RTEST',
+                color: isRawTestEnabled ? Colors.amber : Colors.grey,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
             onTap: onToggleNatural48,
             child: _rotate(
               _pill(
@@ -200,7 +215,7 @@ class ControlsOverlay extends StatelessWidget {
 
   Widget _pill({IconData? icon, required String label, required Color color}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.black54,
         borderRadius: BorderRadius.circular(16),

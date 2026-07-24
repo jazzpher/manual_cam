@@ -35,6 +35,7 @@ class CameraManager: NSObject {
     private var isFrameModeEnabled = false
     private var flashMode: AVCaptureDevice.FlashMode = .off
     private var lastPhotoCompletion: ((Result<[String: String], Error>) -> Void)?
+    private var rawTestDelegate: RawTestCaptureDelegate?
 
     private var pendingRawURL: String?
     private var pendingJpegURL: String?
@@ -894,6 +895,140 @@ class CameraManager: NSObject {
 
     deinit {
         motionManager.stopAccelerometerUpdates()
+    }
+
+    // MARK: - Bayer RAW Validation Capture
+
+    func captureRawTest(
+        completion: @escaping (Result<[String: String], Error>) -> Void
+    ) {
+        sessionQueue.async {
+            guard self.rawTestDelegate == nil else {
+                let error = NSError(
+                    domain: "Camera",
+                    code: 30,
+                    userInfo: [NSLocalizedDescriptionKey: "A RAW test capture is already running"]
+                )
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+
+            guard let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes
+                .first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) else {
+                let error = NSError(
+                    domain: "Camera",
+                    code: 31,
+                    userInfo: [NSLocalizedDescriptionKey: "Bayer RAW is not available"]
+                )
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+
+            let orientation = self.videoOrientation(for: self.currentPhysicalOrientation)
+            if let connection = self.photoOutput.connection(with: .video),
+               connection.isVideoOrientationSupported {
+                connection.videoOrientation = orientation
+            }
+
+            let delegate = RawTestCaptureDelegate(rawFormat: rawFormat) { [weak self] result in
+                self?.sessionQueue.async {
+                    self?.rawTestDelegate = nil
+                }
+                DispatchQueue.main.async { completion(result) }
+            }
+            self.rawTestDelegate = delegate
+
+            let settings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat)
+            settings.isHighResolutionPhotoEnabled = false
+            settings.isAutoStillImageStabilizationEnabled = false
+            if #available(iOS 13.0, *) {
+                settings.photoQualityPrioritization = .quality
+            }
+
+            self.photoOutput.capturePhoto(with: settings, delegate: delegate)
+        }
+    }
+}
+
+// MARK: - RawTestCaptureDelegate
+
+final class RawTestCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
+    private let requestedRawFormat: OSType
+    private let completion: (Result<[String: String], Error>) -> Void
+    private var didFinish = false
+
+    init(
+        rawFormat: OSType,
+        completion: @escaping (Result<[String: String], Error>) -> Void
+    ) {
+        self.requestedRawFormat = rawFormat
+        self.completion = completion
+        super.init()
+    }
+
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishProcessingPhoto photo: AVCapturePhoto,
+        error: Error?
+    ) {
+        guard !didFinish else { return }
+        didFinish = true
+
+        if let error = error {
+            completion(.failure(error))
+            return
+        }
+
+        guard photo.isRawPhoto,
+              let dngData = photo.fileDataRepresentation() else {
+            completion(.failure(NSError(
+                domain: "Camera",
+                code: 32,
+                userInfo: [NSLocalizedDescriptionKey: "RAW capture did not produce DNG data"]
+            )))
+            return
+        }
+
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let filename = "manualcam_\(timestamp)_raw_test.dng"
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent(filename)
+
+        do {
+            try dngData.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch {
+            completion(.failure(error))
+            return
+        }
+
+        var details: [String: String] = [
+            "dng": path,
+            "rawFormat": Self.fourCC(requestedRawFormat),
+            "fileBytes": String(dngData.count)
+        ]
+
+        if let pixelBuffer = photo.pixelBuffer {
+            details["pixelFormat"] = Self.fourCC(
+                CVPixelBufferGetPixelFormatType(pixelBuffer)
+            )
+            details["width"] = String(CVPixelBufferGetWidth(pixelBuffer))
+            details["height"] = String(CVPixelBufferGetHeight(pixelBuffer))
+            details["bytesPerRow"] = String(CVPixelBufferGetBytesPerRow(pixelBuffer))
+            details["planeCount"] = String(CVPixelBufferGetPlaneCount(pixelBuffer))
+        }
+
+        print("✅ RAW TEST: \(details)")
+        completion(.success(details))
+    }
+
+    private static func fourCC(_ value: OSType) -> String {
+        let bytes: [UInt8] = [
+            UInt8((value >> 24) & 0xff),
+            UInt8((value >> 16) & 0xff),
+            UInt8((value >> 8) & 0xff),
+            UInt8(value & 0xff)
+        ]
+        return String(bytes: bytes, encoding: .ascii) ?? String(value)
     }
 }
 

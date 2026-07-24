@@ -222,4 +222,38 @@ class NativeCamera {
       throw Exception('$method failed: ${e.message}');
     }
   }
+
+  /// Diagnostic capture of one standard Bayer RAW frame as an untouched DNG.
+  Future<Map<String, String>> captureRawTest() async {
+    try {
+      final result = await _channel.invokeMethod('captureRawTest');
+      if (result == null) throw Exception('RAW test capture returned null');
+
+      final Map<String, String> paths = {};
+      if (result is Map) {
+        result.forEach((k, v) {
+          if (k is String && v is String) {
+            paths[k] = v;
+          }
+        });
+      }
+
+      if (paths.isEmpty) throw Exception('No files created');
+
+      // Save DNG to Photos
+      if (paths['dng'] != null) {
+        try {
+          final hasAccess = await Gal.hasAccess(toAlbum: true);
+          if (!hasAccess) await Gal.requestAccess(toAlbum: true);
+          await Gal.putImage(paths['dng']!, album: 'ManualCam');
+        } catch (e) {
+          print('❌ Photos save error: $e');
+        }
+      }
+
+      return paths;
+    } on PlatformException catch (e) {
+      throw Exception('RAW test capture failed: ${e.message}');
+    }
+  }
 }
