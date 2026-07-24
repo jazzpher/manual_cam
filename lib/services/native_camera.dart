@@ -37,7 +37,7 @@ class NativeCamera {
       if (result == null) throw Exception('Setup returned null');
       _capabilities = result.map((k, v) => MapEntry(k.toString(), v));
       _initialized = true;
-      print('✅ Native camera setup complete');
+      print('âœ… Native camera setup complete');
     } on PlatformException catch (e) {
       throw Exception('Native camera setup failed: ${e.message}');
     }
@@ -213,7 +213,7 @@ class NativeCamera {
           await Gal.putImage(paths['raw']!, album: 'ManualCam');
         }
       } catch (e) {
-        print('❌ Photos save error: $e');
+        print('âŒ Photos save error: $e');
       }
 
       paths['zoom'] = softwareZoom.toStringAsFixed(1);
@@ -245,6 +245,66 @@ class NativeCamera {
       return paths;
     } on PlatformException catch (e) {
       throw Exception('RAW test capture failed: ${e.message}');
+    }
+  }
+
+  /// Three-frame RAW diagnostic burst.
+  ///
+  /// The native Swift side temporarily locks ISO, shutter, focus, and white
+  /// balance through beginRawBurstLock/endRawBurstLock. Each frame is still an
+  /// untouched Apple-generated Bayer DNG saved by the same validated
+  /// captureRawTest path.
+  Future<Map<String, String>> captureRawBurst() async {
+    var lockStarted = false;
+    final merged = <String, String>{'count': '0'};
+
+    try {
+      final lockResult = await _channel.invokeMethod('beginRawBurstLock');
+      lockStarted = lockResult == true;
+      if (!lockStarted) {
+        throw Exception('Unable to lock camera controls for RAW burst');
+      }
+
+      for (var i = 1; i <= 3; i++) {
+        final frame = await captureRawTest();
+        final suffix = i.toString().padLeft(2, '0');
+
+        for (final entry in frame.entries) {
+          if (entry.key == 'raw') {
+            merged['raw$suffix'] = entry.value;
+          } else {
+            merged['${entry.key}$suffix'] = entry.value;
+          }
+        }
+
+        // Keep the first frame diagnostics as the headline snackbar values.
+        if (i == 1) {
+          for (final key in <String>[
+            'width',
+            'height',
+            'rawFormat',
+            'pixelFormat',
+            'dngBytes',
+          ]) {
+            final value = frame[key];
+            if (value != null) merged[key] = value;
+          }
+        }
+
+        merged['count'] = i.toString();
+      }
+
+      return merged;
+    } on PlatformException catch (e) {
+      throw Exception('RAW burst capture failed: ${e.message}');
+    } finally {
+      if (lockStarted) {
+        try {
+          await _channel.invokeMethod('endRawBurstLock');
+        } catch (e) {
+          print('endRawBurstLock error: $e');
+        }
+      }
     }
   }
 }
