@@ -1049,11 +1049,11 @@ class CameraManager: NSObject {
             return CIImage.empty()
         }
 
-        // Reference-heavy merge for handheld/low-light bursts. Equal averaging
-        // lowers noise more, but it also makes 1/15s handheld captures look
-        // muddy when there is small residual movement. This keeps frame 1 as
-        // the sharp detail anchor while frames 2/3 contribute mild denoising.
-        let referenceWeight: CGFloat = 0.70
+        // Natural reference-heavy merge for handheld/low-light bursts.
+        // Frame 1 remains the detail anchor while frames 2/3 contribute mild
+        // denoising. This avoids the blurry equal-average look without making
+        // the JPEG overly crispy.
+        let referenceWeight: CGFloat = 0.80
         let remainingWeight = max(0.0, 1.0 - referenceWeight)
         let extraCount = max(images.count - 1, 1)
         let extraWeight = remainingWeight / CGFloat(extraCount)
@@ -1072,20 +1072,20 @@ class CameraManager: NSObject {
     }
 
     private func sharpenMergedPreview(_ image: CIImage) -> CIImage {
-        // Moderate RAW-preview sharpening. Avoid heavy halos; this is only the
-        // enhanced preview while the untouched DNGs remain the primary files.
+        // Gentle RAW-preview sharpening. The untouched DNGs remain the primary
+        // files; this JPEG is only a natural-looking enhanced preview.
         let sharpened = image.applyingFilter(
             "CISharpenLuminance",
             parameters: [
-                kCIInputSharpnessKey: 0.65
+                kCIInputSharpnessKey: 0.30
             ]
         )
 
         return sharpened.applyingFilter(
             "CIUnsharpMask",
             parameters: [
-                kCIInputRadiusKey: 1.2,
-                kCIInputIntensityKey: 0.35
+                kCIInputRadiusKey: 0.8,
+                kCIInputIntensityKey: 0.18
             ]
         )
     }
