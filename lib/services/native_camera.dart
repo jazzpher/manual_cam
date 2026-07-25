@@ -37,7 +37,7 @@ class NativeCamera {
       if (result == null) throw Exception('Setup returned null');
       _capabilities = result.map((k, v) => MapEntry(k.toString(), v));
       _initialized = true;
-      print('ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Native camera setup complete');
+      print('ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ Native camera setup complete');
     } on PlatformException catch (e) {
       throw Exception('Native camera setup failed: ${e.message}');
     }
@@ -213,7 +213,7 @@ class NativeCamera {
           await Gal.putImage(paths['raw']!, album: 'ManualCam');
         }
       } catch (e) {
-        print('ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ Photos save error: $e');
+        print('ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Photos save error: $e');
       }
 
       paths['zoom'] = softwareZoom.toStringAsFixed(1);
