@@ -51,7 +51,7 @@ class CameraManager: NSObject {
     private let motionManager = CMMotionManager()
     private var currentPhysicalOrientation: UIDeviceOrientation = .portrait
 
-    // Core Image context â€” reusable, Metal GPU-accelerated
+    // Core Image context Ã¢â‚¬â€ reusable, Metal GPU-accelerated
     // Configured for wide-gamut Display P3 frame rendering
     private let rawMergeQueue = DispatchQueue(
         label: "camera.raw.merge.queue",
@@ -335,7 +335,7 @@ class CameraManager: NSObject {
                         }
                         d.unlockForConfiguration()
                     } catch {
-                        print("âš ï¸ Unable to resume continuous AE/AF: \(error)")
+                        print("Ã¢Å¡Â Ã¯Â¸Â Unable to resume continuous AE/AF: \(error)")
                     }
                 }
             } catch { completion(false) }
@@ -413,7 +413,7 @@ class CameraManager: NSObject {
                 }
                 completion(true)
             } catch {
-                print("âš ï¸ 4K Frame mode error: \(error)")
+                print("Ã¢Å¡Â Ã¯Â¸Â 4K Frame mode error: \(error)")
                 completion(false)
             }
         }
@@ -467,7 +467,7 @@ class CameraManager: NSObject {
                 d.unlockForConfiguration()
                 completion(true)
             } catch {
-                print("âš ï¸ 48mm Natural mode error: \(error)")
+                print("Ã¢Å¡Â Ã¯Â¸Â 48mm Natural mode error: \(error)")
                 completion(false)
             }
         }
@@ -499,7 +499,7 @@ class CameraManager: NSObject {
                 }
                 d.unlockForConfiguration()
             } catch {
-                print("âš ï¸ RAW toggle zoom sync error: \(error)")
+                print("Ã¢Å¡Â Ã¯Â¸Â RAW toggle zoom sync error: \(error)")
             }
         }
     }
@@ -863,7 +863,7 @@ class CameraManager: NSObject {
             contentsOf: sourceURL,
             options: [.applyOrientationProperty: true]
         ) else {
-            print("âš ï¸ Failed to load JPEG for software zoom")
+            print("Ã¢Å¡Â Ã¯Â¸Â Failed to load JPEG for software zoom")
             return nil
         }
 
@@ -881,7 +881,7 @@ class CameraManager: NSObject {
 
         guard let cgImage = ciContext.createCGImage(image, from: image.extent),
               let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.95) else {
-            print("âš ï¸ Failed to render software-zoom JPEG")
+            print("Ã¢Å¡Â Ã¯Â¸Â Failed to render software-zoom JPEG")
             return nil
         }
 
@@ -892,10 +892,10 @@ class CameraManager: NSObject {
 
         do {
             try jpegData.write(to: URL(fileURLWithPath: outputPath))
-            print("âœ… GPU software zoom applied: \(softwareZoomFactor)x")
+            print("Ã¢Å“â€¦ GPU software zoom applied: \(softwareZoomFactor)x")
             return outputPath
         } catch {
-            print("âš ï¸ Failed to save software-zoom JPEG: \(error)")
+            print("Ã¢Å¡Â Ã¯Â¸Â Failed to save software-zoom JPEG: \(error)")
             return nil
         }
     }
@@ -1254,12 +1254,20 @@ class CameraManager: NSObject {
 
     func beginRawBurstLock(completion: @escaping (Bool) -> Void) {
         sessionQueue.async {
-            self.waitForRawBurstStability(attempt: 0, completion: completion)
+            // Give the camera time to settle after startup or a sudden change
+            // from a bright scene to low light. One stable sample is not enough
+            // because exposureDuration can still be changing between frames.
+            self.waitForRawBurstStability(
+                attempt: 0,
+                stableSamples: 0,
+                completion: completion
+            )
         }
     }
 
     private func waitForRawBurstStability(
         attempt: Int,
+        stableSamples: Int,
         completion: @escaping (Bool) -> Void
     ) {
         guard let d = device else {
@@ -1267,23 +1275,59 @@ class CameraManager: NSObject {
             return
         }
 
-        let adjusting = d.isAdjustingExposure ||
-            d.isAdjustingFocus ||
-            d.isAdjustingWhiteBalance
-        if adjusting && attempt < 20 {
-            sessionQueue.asyncAfter(deadline: .now() + 0.05) {
-                self.waitForRawBurstStability(
-                    attempt: attempt + 1,
-                    completion: completion
+        let durationSeconds = CMTimeGetSeconds(d.exposureDuration)
+        let iso = d.iso
+        let durationIsValid = durationSeconds.isFinite && durationSeconds > 0
+        let isoIsValid = iso.isFinite
+            && iso >= d.activeFormat.minISO
+            && iso <= d.activeFormat.maxISO
+        let controlsAreStable = !d.isAdjustingExposure
+            && !d.isAdjustingFocus
+            && !d.isAdjustingWhiteBalance
+            && durationIsValid
+            && isoIsValid
+
+        let nextStableSamples = controlsAreStable ? stableSamples + 1 : 0
+
+        // Require three consecutive stable samples. This prevents an invalid or
+        // half-settled auto exposure from being passed to RAW capture.
+        if nextStableSamples < 3 {
+            if attempt < 40 {
+                sessionQueue.asyncAfter(deadline: .now() + 0.05) {
+                    self.waitForRawBurstStability(
+                        attempt: attempt + 1,
+                        stableSamples: nextStableSamples,
+                        completion: completion
+                    )
+                }
+            } else {
+                let error = NSError(
+                    domain: "Camera",
+                    code: 34,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Camera exposure did not become stable for RAW burst"
+                    ]
                 )
+                print("RAW burst stability timeout: \(error)")
+                DispatchQueue.main.async { completion(false) }
             }
             return
         }
 
+        let safeDuration = CMTimeMaximum(
+            d.activeFormat.minExposureDuration,
+            CMTimeMinimum(d.exposureDuration, d.activeFormat.maxExposureDuration)
+        )
+        let safeISO = max(
+            d.activeFormat.minISO,
+            min(d.iso, d.activeFormat.maxISO)
+        )
+
         let state = RawBurstControlState(
             exposureMode: d.exposureMode,
-            exposureDuration: d.exposureDuration,
-            iso: d.iso,
+            exposureDuration: safeDuration,
+            iso: safeISO,
             exposureBias: d.exposureTargetBias,
             focusMode: d.focusMode,
             lensPosition: d.lensPosition,
@@ -1295,8 +1339,8 @@ class CameraManager: NSObject {
             try d.lockForConfiguration()
             if d.isExposureModeSupported(.custom) {
                 d.setExposureModeCustom(
-                    duration: state.exposureDuration,
-                    iso: state.iso,
+                    duration: safeDuration,
+                    iso: safeISO,
                     completionHandler: nil
                 )
             }
@@ -1318,7 +1362,9 @@ class CameraManager: NSObject {
             d.unlockForConfiguration()
             rawBurstControlState = state
 
-            sessionQueue.asyncAfter(deadline: .now() + 0.15) {
+            // Allow the custom exposure/focus/WB values to take effect before
+            // the first AVCapturePhotoSettings RAW request.
+            sessionQueue.asyncAfter(deadline: .now() + 0.20) {
                 DispatchQueue.main.async { completion(true) }
             }
         } catch {
@@ -1388,7 +1434,6 @@ class CameraManager: NSObject {
             }
         }
     }
-
     private func clampedBurstWhiteBalanceGains(
         _ gains: AVCaptureDevice.WhiteBalanceGains,
         device: AVCaptureDevice
@@ -1534,7 +1579,7 @@ final class RawTestCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             details["planeCount"] = String(CVPixelBufferGetPlaneCount(pixelBuffer))
         }
 
-        print("âœ… RAW TEST: \(details)")
+        print("Ã¢Å“â€¦ RAW TEST: \(details)")
         saveDNGToPhotos(fileURL: URL(fileURLWithPath: path), details: details)
     }
 
