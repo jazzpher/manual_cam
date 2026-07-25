@@ -219,7 +219,7 @@ class _CameraScreenState extends State<CameraScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Ã¢Å¡Â Ã¯Â¸Â RAW not supported on this device'),
+            content: Text('ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â RAW not supported on this device'),
             backgroundColor: Colors.orange,
             duration: Duration(seconds: 2),
           ),
@@ -304,8 +304,8 @@ class _CameraScreenState extends State<CameraScreen> {
       SnackBar(
         content: Text(
           enable
-              ? '4K Frame ON Ã‚Â· Auto AE/AF Ã‚Â· Manual override ready'
-              : '4K Frame OFF Ã‚Â· Photo mode restored',
+              ? '4K Frame ON Ãƒâ€šÃ‚Â· Auto AE/AF Ãƒâ€šÃ‚Â· Manual override ready'
+              : '4K Frame OFF Ãƒâ€šÃ‚Â· Photo mode restored',
         ),
         duration: const Duration(seconds: 2),
       ),
@@ -349,8 +349,8 @@ class _CameraScreenState extends State<CameraScreen> {
       SnackBar(
         content: Text(
           enable
-              ? '48mm Natural ON Ã‚Â· Auto AE/AF Ã‚Â· High-quality JPEG'
-              : '48mm Natural OFF Ã‚Â· 1x camera restored',
+              ? '48mm Natural ON Ãƒâ€šÃ‚Â· Auto AE/AF Ãƒâ€šÃ‚Â· High-quality JPEG'
+              : '48mm Natural OFF Ãƒâ€šÃ‚Â· 1x camera restored',
         ),
         duration: const Duration(seconds: 2),
       ),
@@ -406,29 +406,29 @@ class _CameraScreenState extends State<CameraScreen> {
         String message;
         if (_isRawBurstEnabled) {
           final width = paths['width'];
-          final height = paths['height'];
-          final format = paths['pixelFormat'] ?? paths['rawFormat'];
-          final sizeLabel = width != null && height != null
-              ? ' Ã‚Â· ${width}x$height'
-              : '';
-          final formatLabel = format != null ? ' Ã‚Â· $format' : '';
-          final count = paths['count'] ?? '3';
-          final mergeLabel = paths['enhancedJpeg'] != null
-              ? ' + enhanced JPEG'
-              : paths['mergeError'] != null
-              ? ' Â· merge preview failed'
-              : '';
-          final lockLabel = paths['lockWarning'] != null
-              ? ' Â· lock fallback'
-              : '';
-          message =
-              'ðŸ§ª RAW BURST saved Â· $count DNGs$mergeLabel$lockLabel$sizeLabel$formatLabel';
+        final height = paths['height'];
+        final format = paths['pixelFormat'] ?? paths['rawFormat'];
+        final sizeLabel = width != null && height != null
+            ? ' ${width}x$height'
+            : '';
+        final formatLabel = format != null ? ' $format' : '';
+        final count = paths['count'] ?? '3';
+        final mergeLabel = paths['enhancedJpeg'] != null
+            ? ' + enhanced JPEG'
+            : paths['mergeError'] != null
+            ? ' - merge preview failed'
+            : '';
+        final lockLabel = paths['lockWarning'] != null
+            ? ' - lock fallback'
+            : '';
+        message =
+            'RAW BURST saved - $count DNGs$mergeLabel$lockLabel$sizeLabel$formatLabel';
         } else if (_isFrameModeEnabled) {
-          message = 'Ã°Å¸Å½Å¾Ã¯Â¸Â 4K video frame saved$zoomLabel';
+          message = 'ÃƒÂ°Ã…Â¸Ã…Â½Ã…Â¾ÃƒÂ¯Ã‚Â¸Ã‚Â 4K video frame saved$zoomLabel';
         } else if (paths.containsKey('raw')) {
-          message = 'Ã°Å¸â€œÂ¸ RAW + JPEG saved$zoomLabel';
+          message = 'ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â¸ RAW + JPEG saved$zoomLabel';
         } else {
-          message = 'Ã°Å¸â€œÂ¸ JPEG saved$zoomLabel';
+          message = 'ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â¸ JPEG saved$zoomLabel';
         }
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -466,7 +466,7 @@ class _CameraScreenState extends State<CameraScreen> {
     }
     if (_isNatural48Enabled) parts.add('48MM NATURAL');
     if (_isFrameModeEnabled) parts.add('4K FRAME');
-    return parts.join(' Ã‚Â· ');
+    return parts.join(' Ãƒâ€šÃ‚Â· ');
   }
 
   @override
@@ -582,7 +582,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                '$_aspectRatio Ã‚Â· ${_modeLabel()} Ã‚Â· ${_zoom.toStringAsFixed(1)}x',
+                '$_aspectRatio Ãƒâ€šÃ‚Â· ${_modeLabel()} Ãƒâ€šÃ‚Â· ${_zoom.toStringAsFixed(1)}x',
                 style: const TextStyle(
                   color: Colors.amber,
                   fontSize: 10,
