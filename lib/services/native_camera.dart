@@ -1,4 +1,4 @@
-﻿import 'package:flutter/services.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:gal/gal.dart';
 
@@ -37,7 +37,7 @@ class NativeCamera {
       if (result == null) throw Exception('Setup returned null');
       _capabilities = result.map((k, v) => MapEntry(k.toString(), v));
       _initialized = true;
-      print('Ã¢Å“â€¦ Native camera setup complete');
+      print('ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Native camera setup complete');
     } on PlatformException catch (e) {
       throw Exception('Native camera setup failed: ${e.message}');
     }
@@ -213,7 +213,7 @@ class NativeCamera {
           await Gal.putImage(paths['raw']!, album: 'ManualCam');
         }
       } catch (e) {
-        print('Ã¢ÂÅ’ Photos save error: $e');
+        print('ÃƒÂ¢Ã‚ÂÃ…â€™ Photos save error: $e');
       }
 
       paths['zoom'] = softwareZoom.toStringAsFixed(1);
@@ -262,7 +262,13 @@ class NativeCamera {
       final lockResult = await _channel.invokeMethod('beginRawBurstLock');
       lockStarted = lockResult == true;
       if (!lockStarted) {
-        throw Exception('Unable to lock camera controls for RAW burst');
+        // Best-effort fallback for startup/very-low-light scenes where
+        // AVCaptureDevice configuration locking is temporarily unavailable.
+        // The DNG burst can still be captured, but the result is explicitly
+        // marked because ISO/WB/focus may be auto between frames.
+        merged['lockWarning'] =
+            'Camera controls were not locked; captured with current auto values';
+        print('RAW burst lock unavailable; continuing with current camera values');
       }
 
       final dngPaths = <String>[];
