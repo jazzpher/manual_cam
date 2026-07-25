@@ -1,4 +1,4 @@
-﻿import AVFoundation
+import AVFoundation
 import UIKit
 import Flutter
 import Photos
@@ -1092,39 +1092,55 @@ class CameraManager: NSObject {
     }
 
     private func applyProRawLikeTone(to image: CIImage) -> CIImage {
-        // ProRAW-like preview tone: make the RAW-derived merge look less flat
-        // while keeping the original DNGs untouched. Values are intentionally
-        // conservative to avoid the fake-HDR/overprocessed look.
+        // Step 3G: highlight-safe ProRAW-like preview tone.
+        // Keep the original DNGs untouched. This function only affects the
+        // computational JPEG preview.
+        //
+        // Compared with Step 3F:
+        // - lower exposure lift to reduce clipping
+        // - lower saturation/contrast for a more natural color response
+        // - explicit highlight/shadow protection
+        // - softer upper tone curve
         let exposureLifted = image.applyingFilter(
             "CIExposureAdjust",
             parameters: [
-                kCIInputEVKey: 0.15
+                kCIInputEVKey: 0.07
             ]
         )
 
         let colorAdjusted = exposureLifted.applyingFilter(
             "CIColorControls",
             parameters: [
-                kCIInputSaturationKey: 1.10,
-                kCIInputContrastKey: 1.04,
+                kCIInputSaturationKey: 1.06,
+                kCIInputContrastKey: 1.03,
                 kCIInputBrightnessKey: 0.0
             ]
         )
 
-        // Mild S-curve: small shadow lift, midtone contrast, and slightly
-        // compressed highlights for a more processed-but-natural RAW look.
-        return colorAdjusted.applyingFilter(
+        // Recover some highlight headroom and gently lift deep shadows before
+        // the tone curve. The filter uses string keys to avoid SDK-constant
+        // availability differences across Xcode versions.
+        let highlightSafe = colorAdjusted.applyingFilter(
+            "CIHighlightShadowAdjust",
+            parameters: [
+                "inputHighlightAmount": 0.35,
+                "inputShadowAmount": 0.10
+            ]
+        )
+
+        // Softer S-curve than Step 3F. The upper points deliberately stay below
+        // 1.0 so bright wall/light pixels are less likely to clip.
+        return highlightSafe.applyingFilter(
             "CIToneCurve",
             parameters: [
-                "inputPoint0": CIVector(x: 0.00, y: 0.010),
-                "inputPoint1": CIVector(x: 0.20, y: 0.18),
-                "inputPoint2": CIVector(x: 0.50, y: 0.56),
-                "inputPoint3": CIVector(x: 0.80, y: 0.86),
-                "inputPoint4": CIVector(x: 1.00, y: 0.995)
+                "inputPoint0": CIVector(x: 0.00, y: 0.008),
+                "inputPoint1": CIVector(x: 0.20, y: 0.19),
+                "inputPoint2": CIVector(x: 0.50, y: 0.53),
+                "inputPoint3": CIVector(x: 0.80, y: 0.82),
+                "inputPoint4": CIVector(x: 1.00, y: 0.97)
             ]
         )
     }
-
     private func scaleCIImage(_ image: CIImage, by value: CGFloat) -> CIImage {
         return image.applyingFilter(
             "CIColorMatrix",
