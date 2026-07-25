@@ -38,6 +38,7 @@ class CameraManager: NSObject {
     private var lastPhotoCompletion: ((Result<[String: String], Error>) -> Void)?
     private var rawTestDelegate: RawTestCaptureDelegate?
     private var rawBurstControlState: RawBurstControlState?
+    private var isRawBurstInProgress = false
 
     private var pendingRawURL: String?
     private var pendingJpegURL: String?
@@ -51,7 +52,7 @@ class CameraManager: NSObject {
     private let motionManager = CMMotionManager()
     private var currentPhysicalOrientation: UIDeviceOrientation = .portrait
 
-    // Core Image context ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â reusable, Metal GPU-accelerated
+    // Core Image context ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â reusable, Metal GPU-accelerated
     // Configured for wide-gamut Display P3 frame rendering
     private let rawMergeQueue = DispatchQueue(
         label: "camera.raw.merge.queue",
@@ -323,7 +324,8 @@ class CameraManager: NSObject {
                 // After the tap has had time to settle, resume continuous AE/AF.
                 // Do not override a manual adjustment made in the meantime.
                 self.sessionQueue.asyncAfter(deadline: .now() + 1.0) {
-                    do {
+                                            guard !self.isRawBurstInProgress else { return }
+do {
                         try d.lockForConfiguration()
                         if d.focusMode == .autoFocus,
                            d.isFocusModeSupported(.continuousAutoFocus) {
@@ -335,7 +337,7 @@ class CameraManager: NSObject {
                         }
                         d.unlockForConfiguration()
                     } catch {
-                        print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Unable to resume continuous AE/AF: \(error)")
+                        print("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Unable to resume continuous AE/AF: \(error)")
                     }
                 }
             } catch { completion(false) }
@@ -413,7 +415,7 @@ class CameraManager: NSObject {
                 }
                 completion(true)
             } catch {
-                print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â 4K Frame mode error: \(error)")
+                print("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â 4K Frame mode error: \(error)")
                 completion(false)
             }
         }
@@ -467,7 +469,7 @@ class CameraManager: NSObject {
                 d.unlockForConfiguration()
                 completion(true)
             } catch {
-                print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â 48mm Natural mode error: \(error)")
+                print("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â 48mm Natural mode error: \(error)")
                 completion(false)
             }
         }
@@ -499,7 +501,7 @@ class CameraManager: NSObject {
                 }
                 d.unlockForConfiguration()
             } catch {
-                print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â RAW toggle zoom sync error: \(error)")
+                print("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â RAW toggle zoom sync error: \(error)")
             }
         }
     }
@@ -863,7 +865,7 @@ class CameraManager: NSObject {
             contentsOf: sourceURL,
             options: [.applyOrientationProperty: true]
         ) else {
-            print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Failed to load JPEG for software zoom")
+            print("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Failed to load JPEG for software zoom")
             return nil
         }
 
@@ -881,7 +883,7 @@ class CameraManager: NSObject {
 
         guard let cgImage = ciContext.createCGImage(image, from: image.extent),
               let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.95) else {
-            print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Failed to render software-zoom JPEG")
+            print("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Failed to render software-zoom JPEG")
             return nil
         }
 
@@ -892,10 +894,10 @@ class CameraManager: NSObject {
 
         do {
             try jpegData.write(to: URL(fileURLWithPath: outputPath))
-            print("ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ GPU software zoom applied: \(softwareZoomFactor)x")
+            print("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ GPU software zoom applied: \(softwareZoomFactor)x")
             return outputPath
         } catch {
-            print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Failed to save software-zoom JPEG: \(error)")
+            print("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Failed to save software-zoom JPEG: \(error)")
             return nil
         }
     }
@@ -1254,7 +1256,8 @@ class CameraManager: NSObject {
 
     func beginRawBurstLock(completion: @escaping (Bool) -> Void) {
         sessionQueue.async {
-            // Give the camera time to settle after startup or a sudden change
+                        self.isRawBurstInProgress = true
+// Give the camera time to settle after startup or a sudden change
             // from a bright scene to low light. One stable sample is not enough
             // because exposureDuration can still be changing between frames.
             self.waitForRawBurstStability(
@@ -1376,14 +1379,27 @@ class CameraManager: NSObject {
                 DispatchQueue.main.async { completion(true) }
             }
         } catch {
-            print("RAW burst lock failed: \(error)")
-            DispatchQueue.main.async { completion(false) }
+            // Configuration can be briefly busy while the camera changes
+            // exposure/focus in low light. Retry on the camera queue first.
+            print("RAW burst lock retry: \(error)")
+            if attempt < 40 {
+                sessionQueue.asyncAfter(deadline: .now() + 0.05) {
+                    self.waitForRawBurstStability(
+                        attempt: attempt + 1,
+                        stableSamples: 0,
+                        completion: completion
+                    )
+                }
+            } else {
+                DispatchQueue.main.async { completion(false) }
+            }
         }
     }
 
     func endRawBurstLock(completion: @escaping (Bool) -> Void) {
         sessionQueue.async {
-            guard let d = self.device,
+                        self.isRawBurstInProgress = false
+guard let d = self.device,
                   let state = self.rawBurstControlState else {
                 DispatchQueue.main.async { completion(true) }
                 return
@@ -1587,7 +1603,7 @@ final class RawTestCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             details["planeCount"] = String(CVPixelBufferGetPlaneCount(pixelBuffer))
         }
 
-        print("ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ RAW TEST: \(details)")
+        print("ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ RAW TEST: \(details)")
         saveDNGToPhotos(fileURL: URL(fileURLWithPath: path), details: details)
     }
 

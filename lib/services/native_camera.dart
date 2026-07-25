@@ -37,7 +37,7 @@ class NativeCamera {
       if (result == null) throw Exception('Setup returned null');
       _capabilities = result.map((k, v) => MapEntry(k.toString(), v));
       _initialized = true;
-      print('ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Native camera setup complete');
+      print('ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Native camera setup complete');
     } on PlatformException catch (e) {
       throw Exception('Native camera setup failed: ${e.message}');
     }
@@ -213,7 +213,7 @@ class NativeCamera {
           await Gal.putImage(paths['raw']!, album: 'ManualCam');
         }
       } catch (e) {
-        print('ÃƒÂ¢Ã‚ÂÃ…â€™ Photos save error: $e');
+        print('ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ Photos save error: $e');
       }
 
       paths['zoom'] = softwareZoom.toStringAsFixed(1);
@@ -256,9 +256,11 @@ class NativeCamera {
   /// captureRawTest path.
   Future<Map<String, String>> captureRawBurst() async {
     var lockStarted = false;
+    var lockAttempted = false;
     final merged = <String, String>{'count': '0'};
 
     try {
+      lockAttempted = true;
       final lockResult = await _channel.invokeMethod('beginRawBurstLock');
       lockStarted = lockResult == true;
       if (!lockStarted) {
@@ -306,7 +308,7 @@ class NativeCamera {
         merged['count'] = i.toString();
       }
 
-      if (lockStarted) {
+      if (lockAttempted) {
         try {
           await _channel.invokeMethod('endRawBurstLock');
         } catch (e) {
@@ -340,7 +342,7 @@ class NativeCamera {
     } on PlatformException catch (e) {
       throw Exception('RAW burst capture failed: ${e.message}');
     } finally {
-      if (lockStarted) {
+      if (lockAttempted) {
         try {
           await _channel.invokeMethod('endRawBurstLock');
         } catch (e) {
