@@ -51,7 +51,7 @@ class CameraManager: NSObject {
     private let motionManager = CMMotionManager()
     private var currentPhysicalOrientation: UIDeviceOrientation = .portrait
 
-    // Core Image context Ã¢â‚¬â€ reusable, Metal GPU-accelerated
+    // Core Image context ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â reusable, Metal GPU-accelerated
     // Configured for wide-gamut Display P3 frame rendering
     private let rawMergeQueue = DispatchQueue(
         label: "camera.raw.merge.queue",
@@ -335,7 +335,7 @@ class CameraManager: NSObject {
                         }
                         d.unlockForConfiguration()
                     } catch {
-                        print("Ã¢Å¡Â Ã¯Â¸Â Unable to resume continuous AE/AF: \(error)")
+                        print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Unable to resume continuous AE/AF: \(error)")
                     }
                 }
             } catch { completion(false) }
@@ -413,7 +413,7 @@ class CameraManager: NSObject {
                 }
                 completion(true)
             } catch {
-                print("Ã¢Å¡Â Ã¯Â¸Â 4K Frame mode error: \(error)")
+                print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â 4K Frame mode error: \(error)")
                 completion(false)
             }
         }
@@ -467,7 +467,7 @@ class CameraManager: NSObject {
                 d.unlockForConfiguration()
                 completion(true)
             } catch {
-                print("Ã¢Å¡Â Ã¯Â¸Â 48mm Natural mode error: \(error)")
+                print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â 48mm Natural mode error: \(error)")
                 completion(false)
             }
         }
@@ -499,7 +499,7 @@ class CameraManager: NSObject {
                 }
                 d.unlockForConfiguration()
             } catch {
-                print("Ã¢Å¡Â Ã¯Â¸Â RAW toggle zoom sync error: \(error)")
+                print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â RAW toggle zoom sync error: \(error)")
             }
         }
     }
@@ -863,7 +863,7 @@ class CameraManager: NSObject {
             contentsOf: sourceURL,
             options: [.applyOrientationProperty: true]
         ) else {
-            print("Ã¢Å¡Â Ã¯Â¸Â Failed to load JPEG for software zoom")
+            print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Failed to load JPEG for software zoom")
             return nil
         }
 
@@ -881,7 +881,7 @@ class CameraManager: NSObject {
 
         guard let cgImage = ciContext.createCGImage(image, from: image.extent),
               let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.95) else {
-            print("Ã¢Å¡Â Ã¯Â¸Â Failed to render software-zoom JPEG")
+            print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Failed to render software-zoom JPEG")
             return nil
         }
 
@@ -892,10 +892,10 @@ class CameraManager: NSObject {
 
         do {
             try jpegData.write(to: URL(fileURLWithPath: outputPath))
-            print("Ã¢Å“â€¦ GPU software zoom applied: \(softwareZoomFactor)x")
+            print("ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ GPU software zoom applied: \(softwareZoomFactor)x")
             return outputPath
         } catch {
-            print("Ã¢Å¡Â Ã¯Â¸Â Failed to save software-zoom JPEG: \(error)")
+            print("ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Failed to save software-zoom JPEG: \(error)")
             return nil
         }
     }
@@ -1281,40 +1281,48 @@ class CameraManager: NSObject {
         let isoIsValid = iso.isFinite
             && iso >= d.activeFormat.minISO
             && iso <= d.activeFormat.maxISO
-        let controlsAreStable = !d.isAdjustingExposure
-            && !d.isAdjustingFocus
-            && !d.isAdjustingWhiteBalance
-            && durationIsValid
-            && isoIsValid
-
+        // In a dark room, autofocus or auto-white-balance may remain adjusting
+        // even when exposureDuration and ISO are already valid. They must not
+        // block the RAW burst lock.
+        let exposureIsUsable = durationIsValid && isoIsValid
+        let exposureIsStable = !d.isAdjustingExposure && exposureIsUsable
+        let controlsAreStable = exposureIsStable
         let nextStableSamples = controlsAreStable ? stableSamples + 1 : 0
 
         // Require three consecutive stable samples. This prevents an invalid or
         // half-settled auto exposure from being passed to RAW capture.
-        if nextStableSamples < 3 {
-            if attempt < 40 {
-                sessionQueue.asyncAfter(deadline: .now() + 0.05) {
-                    self.waitForRawBurstStability(
-                        attempt: attempt + 1,
-                        stableSamples: nextStableSamples,
-                        completion: completion
-                    )
-                }
-            } else {
-                let error = NSError(
-                    domain: "Camera",
-                    code: 34,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "Camera exposure did not become stable for RAW burst"
-                    ]
+        // Wait while exposure is changing. AF/WB are intentionally not part of
+        // this gate because they may stay adjusting in low light.
+        if nextStableSamples < 3 && attempt < 40 {
+            sessionQueue.asyncAfter(deadline: .now() + 0.05) {
+                self.waitForRawBurstStability(
+                    attempt: attempt + 1,
+                    stableSamples: nextStableSamples,
+                    completion: completion
                 )
-                print("RAW burst stability timeout: \(error)")
-                DispatchQueue.main.async { completion(false) }
             }
             return
         }
 
+        // Proceed with the last valid/clamped exposure after the wait. Only
+        // reject the capture when ISO or shutter is genuinely invalid.
+        if !exposureIsUsable {
+            let error = NSError(
+                domain: "Camera",
+                code: 34,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Camera exposure values are not valid for RAW burst"
+                ]
+            )
+            print("RAW burst exposure validation failed: \(error)")
+            DispatchQueue.main.async { completion(false) }
+            return
+        }
+
+        if nextStableSamples < 3 {
+            print("RAW burst: using last valid exposure after stabilization timeout")
+        }
         let safeDuration = CMTimeMaximum(
             d.activeFormat.minExposureDuration,
             CMTimeMinimum(d.exposureDuration, d.activeFormat.maxExposureDuration)
@@ -1579,7 +1587,7 @@ final class RawTestCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             details["planeCount"] = String(CVPixelBufferGetPlaneCount(pixelBuffer))
         }
 
-        print("Ã¢Å“â€¦ RAW TEST: \(details)")
+        print("ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ RAW TEST: \(details)")
         saveDNGToPhotos(fileURL: URL(fileURLWithPath: path), details: details)
     }
 
