@@ -1,4 +1,4 @@
-import AVFoundation
+﻿import AVFoundation
 import UIKit
 import Flutter
 import Photos
@@ -51,7 +51,7 @@ class CameraManager: NSObject {
     private let motionManager = CMMotionManager()
     private var currentPhysicalOrientation: UIDeviceOrientation = .portrait
 
-    // Core Image context — reusable, Metal GPU-accelerated
+    // Core Image context â€” reusable, Metal GPU-accelerated
     // Configured for wide-gamut Display P3 frame rendering
     private let rawMergeQueue = DispatchQueue(
         label: "camera.raw.merge.queue",
@@ -335,7 +335,7 @@ class CameraManager: NSObject {
                         }
                         d.unlockForConfiguration()
                     } catch {
-                        print("⚠️ Unable to resume continuous AE/AF: \(error)")
+                        print("âš ï¸ Unable to resume continuous AE/AF: \(error)")
                     }
                 }
             } catch { completion(false) }
@@ -413,7 +413,7 @@ class CameraManager: NSObject {
                 }
                 completion(true)
             } catch {
-                print("⚠️ 4K Frame mode error: \(error)")
+                print("âš ï¸ 4K Frame mode error: \(error)")
                 completion(false)
             }
         }
@@ -467,7 +467,7 @@ class CameraManager: NSObject {
                 d.unlockForConfiguration()
                 completion(true)
             } catch {
-                print("⚠️ 48mm Natural mode error: \(error)")
+                print("âš ï¸ 48mm Natural mode error: \(error)")
                 completion(false)
             }
         }
@@ -499,7 +499,7 @@ class CameraManager: NSObject {
                 }
                 d.unlockForConfiguration()
             } catch {
-                print("⚠️ RAW toggle zoom sync error: \(error)")
+                print("âš ï¸ RAW toggle zoom sync error: \(error)")
             }
         }
     }
@@ -863,7 +863,7 @@ class CameraManager: NSObject {
             contentsOf: sourceURL,
             options: [.applyOrientationProperty: true]
         ) else {
-            print("⚠️ Failed to load JPEG for software zoom")
+            print("âš ï¸ Failed to load JPEG for software zoom")
             return nil
         }
 
@@ -881,7 +881,7 @@ class CameraManager: NSObject {
 
         guard let cgImage = ciContext.createCGImage(image, from: image.extent),
               let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.95) else {
-            print("⚠️ Failed to render software-zoom JPEG")
+            print("âš ï¸ Failed to render software-zoom JPEG")
             return nil
         }
 
@@ -892,10 +892,10 @@ class CameraManager: NSObject {
 
         do {
             try jpegData.write(to: URL(fileURLWithPath: outputPath))
-            print("✅ GPU software zoom applied: \(softwareZoomFactor)x")
+            print("âœ… GPU software zoom applied: \(softwareZoomFactor)x")
             return outputPath
         } catch {
-            print("⚠️ Failed to save software-zoom JPEG: \(error)")
+            print("âš ï¸ Failed to save software-zoom JPEG: \(error)")
             return nil
         }
     }
@@ -1078,15 +1078,15 @@ class CameraManager: NSObject {
         let sharpened = image.applyingFilter(
             "CISharpenLuminance",
             parameters: [
-                kCIInputSharpnessKey: 0.30
+                kCIInputSharpnessKey: 0.20
             ]
         )
 
         return sharpened.applyingFilter(
             "CIUnsharpMask",
             parameters: [
-                kCIInputRadiusKey: 0.8,
-                kCIInputIntensityKey: 0.18
+                kCIInputRadiusKey: 0.7,
+                kCIInputIntensityKey: 0.12
             ]
         )
     }
@@ -1098,15 +1098,15 @@ class CameraManager: NSObject {
         let exposureLifted = image.applyingFilter(
             "CIExposureAdjust",
             parameters: [
-                kCIInputEVKey: 0.12
+                kCIInputEVKey: 0.15
             ]
         )
 
         let colorAdjusted = exposureLifted.applyingFilter(
             "CIColorControls",
             parameters: [
-                kCIInputSaturationKey: 1.06,
-                kCIInputContrastKey: 1.07,
+                kCIInputSaturationKey: 1.10,
+                kCIInputContrastKey: 1.04,
                 kCIInputBrightnessKey: 0.0
             ]
         )
@@ -1116,11 +1116,11 @@ class CameraManager: NSObject {
         return colorAdjusted.applyingFilter(
             "CIToneCurve",
             parameters: [
-                "inputPoint0": CIVector(x: 0.00, y: 0.015),
-                "inputPoint1": CIVector(x: 0.22, y: 0.19),
-                "inputPoint2": CIVector(x: 0.50, y: 0.52),
-                "inputPoint3": CIVector(x: 0.78, y: 0.82),
-                "inputPoint4": CIVector(x: 1.00, y: 0.985)
+                "inputPoint0": CIVector(x: 0.00, y: 0.010),
+                "inputPoint1": CIVector(x: 0.20, y: 0.18),
+                "inputPoint2": CIVector(x: 0.50, y: 0.56),
+                "inputPoint3": CIVector(x: 0.80, y: 0.86),
+                "inputPoint4": CIVector(x: 1.00, y: 0.995)
             ]
         )
     }
@@ -1518,7 +1518,7 @@ final class RawTestCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             details["planeCount"] = String(CVPixelBufferGetPlaneCount(pixelBuffer))
         }
 
-        print("✅ RAW TEST: \(details)")
+        print("âœ… RAW TEST: \(details)")
         saveDNGToPhotos(fileURL: URL(fileURLWithPath: path), details: details)
     }
 
