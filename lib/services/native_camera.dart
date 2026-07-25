@@ -37,7 +37,7 @@ class NativeCamera {
       if (result == null) throw Exception('Setup returned null');
       _capabilities = result.map((k, v) => MapEntry(k.toString(), v));
       _initialized = true;
-      print('ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ Native camera setup complete');
+      print('ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ Native camera setup complete');
     } on PlatformException catch (e) {
       throw Exception('Native camera setup failed: ${e.message}');
     }
@@ -213,7 +213,7 @@ class NativeCamera {
           await Gal.putImage(paths['raw']!, album: 'ManualCam');
         }
       } catch (e) {
-        print('ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Photos save error: $e');
+        print('ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ Photos save error: $e');
       }
 
       paths['zoom'] = softwareZoom.toStringAsFixed(1);
@@ -306,15 +306,6 @@ class NativeCamera {
         }
 
         merged['count'] = i.toString();
-      }
-
-      if (lockAttempted) {
-        try {
-          await _channel.invokeMethod('endRawBurstLock');
-        } catch (e) {
-          print('endRawBurstLock error: $e');
-        }
-        lockStarted = false;
       }
 
       if (dngPaths.length >= 2) {
