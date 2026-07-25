@@ -1068,7 +1068,8 @@ class CameraManager: NSObject {
             )
         }
 
-        return sharpenMergedPreview(accumulated)
+        let sharpened = sharpenMergedPreview(accumulated)
+        return applyProRawLikeTone(to: sharpened)
     }
 
     private func sharpenMergedPreview(_ image: CIImage) -> CIImage {
@@ -1086,6 +1087,40 @@ class CameraManager: NSObject {
             parameters: [
                 kCIInputRadiusKey: 0.8,
                 kCIInputIntensityKey: 0.18
+            ]
+        )
+    }
+
+    private func applyProRawLikeTone(to image: CIImage) -> CIImage {
+        // ProRAW-like preview tone: make the RAW-derived merge look less flat
+        // while keeping the original DNGs untouched. Values are intentionally
+        // conservative to avoid the fake-HDR/overprocessed look.
+        let exposureLifted = image.applyingFilter(
+            "CIExposureAdjust",
+            parameters: [
+                kCIInputEVKey: 0.12
+            ]
+        )
+
+        let colorAdjusted = exposureLifted.applyingFilter(
+            "CIColorControls",
+            parameters: [
+                kCIInputSaturationKey: 1.06,
+                kCIInputContrastKey: 1.07,
+                kCIInputBrightnessKey: 0.0
+            ]
+        )
+
+        // Mild S-curve: small shadow lift, midtone contrast, and slightly
+        // compressed highlights for a more processed-but-natural RAW look.
+        return colorAdjusted.applyingFilter(
+            "CIToneCurve",
+            parameters: [
+                "inputPoint0": CIVector(x: 0.00, y: 0.015),
+                "inputPoint1": CIVector(x: 0.22, y: 0.19),
+                "inputPoint2": CIVector(x: 0.50, y: 0.52),
+                "inputPoint3": CIVector(x: 0.78, y: 0.82),
+                "inputPoint4": CIVector(x: 1.00, y: 0.985)
             ]
         )
     }
